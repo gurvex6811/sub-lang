@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-SUB (Simple Universal Builder) is a cross-platform programming language designed for ease of learning and maximum portability. It uses a blockchain-inspired syntax with hash symbols (#) to create visually clear, chained code blocks.
+SUB (Simple Universal Builder) is a cross-platform programming language designed for ease of learning and maximum portability. It uses a clean, modern syntax to create highly readable code.
 
 ### What's New in v2.0
 - **C++ Embedding**: Native C++ code support alongside C
@@ -21,13 +21,13 @@ SUB (Simple Universal Builder) is a cross-platform programming language designed
 ```
 
 ### 2.2 Variables
-Variables are declared using the `#var` keyword with optional type hints:
+Variables are declared using the `var` keyword with optional type hints:
 ```sub
-#var name = "John"              // String (inferred)
-#var age = 25                   // Number (inferred)
-#var price:float = 19.99        // Explicit type
-#var isActive:bool = true       // Boolean with type
-#var data:auto = getData()      // Auto type inference
+var name = "John"              // String (inferred)
+var age = 25                   // Number (inferred)
+var price:float = 19.99        // Explicit type
+var isActive:bool = true       // Boolean with type
+var data:auto = getData()      // Auto type inference
 ```
 
 ### 2.3 Data Types
@@ -42,99 +42,99 @@ Variables are declared using the `#var` keyword with optional type hints:
 
 ### 2.4 Functions
 ```sub
-#function functionName(param1:int, param2:string):string
+function functionName(param1:int, param2:string):string
     // function body
-    #return result
-#end
+    return result
+end
 
 // Arrow functions (inline)
-#var square = (x:int) => x * x
+var square = (x:int) => x * x
 
 // Generic functions
-#function identity<T>(value:T):T
-    #return value
-#end
+function identity<T>(value:T):T
+    return value
+end
 ```
 
 ### 2.5 Conditionals
 ```sub
-#if condition
+if condition
     // code
-#elif otherCondition
+elif otherCondition
     // code
-#else
+else
     // code
-#end
+end
 
 // Ternary operator
-#var result = condition ? value1 : value2
+var result = condition ? value1 : value2
 ```
 
 ### 2.6 Loops
 
 **For Loop:**
 ```sub
-#for i in range(10)
-    #print(i)
-#end
+for i in range(10)
+    print(i)
+end
 
 // For-each loop
-#for item in collection
-    #print(item)
-#end
+for item in collection
+    print(item)
+end
 
 // C-style for loop
-#for (i = 0; i < 10; i++)
-    #print(i)
-#end
+for (i = 0; i < 10; i++)
+    print(i)
+end
 ```
 
 **While Loop:**
 ```sub
-#while condition
+while condition
     // code
-#end
+end
 
 // Do-while loop
-#do
+do
     // code
-#while condition
+while condition
 ```
 
 ### 2.7 Error Handling
 ```sub
-#try
+try
     // risky code
-    #var result = divide(10, 0)
-#catch DivisionError as e
-    #print("Error: " + e.message)
-    #print(e.stackTrace)
-#catch TypeError as e
-    #print("Type error: " + e.message)
-#finally
+    var result = divide(10, 0)
+catch DivisionError as e
+    print("Error: " + e.message)
+    print(e.stackTrace)
+catch TypeError as e
+    print("Type error: " + e.message)
+finally
     // cleanup code (always executes)
-    #print("Cleanup complete")
-#end
+    print("Cleanup complete")
+end
 
 // Throw custom errors
-#throw CustomError("Something went wrong")
+throw CustomError("Something went wrong")
 ```
 
 ### 2.8 UI Components
 ```sub
-#ui.window(title="App", width=800, height=600)
-    #ui.button(text="Click", onclick=handler)
-    #ui.label(text="Hello")
-    #ui.input(placeholder="Name", id="input1")
-    #ui.slider(min=0, max=100, value=50)
-#end
+ui.window(title="App", width=800, height=600)
+    ui.button(text="Click", onclick=handler)
+    ui.label(text="Hello")
+    ui.input(placeholder="Name", id="input1")
+    ui.slider(min=0, max=100, value=50)
+end
 ```
 
 ### 2.9 Embedded Languages
 
 **C++ Embedding:**
 ```sub
-#embed cpp
+embed cpp
     #include <vector>
     #include <algorithm>
     
@@ -145,47 +145,47 @@ Variables are declared using the `#var` keyword with optional type hints:
     extern "C" int getSum() {
         return std::accumulate(numbers.begin(), numbers.end(), 0);
     }
-#endembed
+endembed
 
 // Call C++ function from SUB
-#var total = getSum()
+var total = getSum()
 ```
 
 **C Embedding:**
 ```sub
-#embed c
+embed c
     #include <stdio.h>
     #include <math.h>
     
     double calculate(double x) {
         return sqrt(x) + pow(x, 2);
     }
-#endembed
+endembed
 ```
 
 **Python Embedding:**
 ```sub
-#embed python
+embed python
     import numpy as np
     import pandas as pd
     
     data = np.array([1, 2, 3, 4, 5])
     mean_value = np.mean(data)
-#endembed
+endembed
 ```
 
 **JavaScript Embedding:**
 ```sub
-#embed javascript
+embed javascript
     const items = [1, 2, 3, 4, 5];
     const doubled = items.map(x => x * 2);
     console.log(doubled);
-#endembed
+endembed
 ```
 
 **Ruby Embedding:**
 ```sub
-#embed ruby
+embed ruby
     class Calculator
       def add(a, b)
         a + b
@@ -199,12 +199,12 @@ Variables are declared using the `#var` keyword with optional type hints:
     calc = Calculator.new
     puts calc.add(5, 3)
     puts calc.multiply(4, 7)
-#endembed
+endembed
 ```
 
 **Rust Embedding (New):**
 ```sub
-#embed rust
+embed rust
     fn fibonacci(n: u32) -> u32 {
         match n {
             0 => 0,
@@ -212,12 +212,12 @@ Variables are declared using the `#var` keyword with optional type hints:
             _ => fibonacci(n-1) + fibonacci(n-2)
         }
     }
-#endembed
+endembed
 ```
 
 **Go Embedding:**
 ```sub
-#embed go
+embed go
     package main
     import "fmt"
     func fibonacci(n int) int {
@@ -227,16 +227,12 @@ Variables are declared using the `#var` keyword with optional type hints:
     func main() {
         fmt.Println(fibonacci(10))
     }
-#endembed
+endembed
 ```
 
-## 3. Blockchain Method
+## 3. Clean, Modern Syntax
 
-The hash symbol (#) serves as a "blockchain" operator that:
-- Marks the start of each statement
-- Creates visual chaining of operations
-- Improves code readability
-- Enforces structured programming
+SUB utilizes a highly recognizable C-style syntax designed to be intuitive for programmers coming from JavaScript, C++, or Java. The language supports // and /* */ as well as # for comments.
 
 ## 4. Cross-Platform Compilation
 
@@ -322,39 +318,39 @@ SUB compiles to native code for multiple platforms:
 ### 6.1 Automatic Memory Management
 SUB uses reference counting with cycle detection for automatic memory management:
 ```sub
-#var data = allocate(1000)  // Automatically managed
+var data = allocate(1000)  // Automatically managed
 // Memory freed when data goes out of scope
 ```
 
 ### 6.2 Manual Memory Control (Advanced)
 ```sub
-#var ptr = malloc(size)     // Manual allocation
-#free(ptr)                  // Manual deallocation
+var ptr = malloc(size)     // Manual allocation
+free(ptr)                  // Manual deallocation
 ```
 
 ## 7. Performance Features
 
 ### 7.1 Inline Assembly (Advanced)
 ```sub
-#asm x86_64
+asm x86_64
     mov rax, 1
     xor rbx, rbx
-#endasm
+endasm
 ```
 
 ### 7.2 SIMD Operations
 ```sub
-#var vec1 = simd.vector([1, 2, 3, 4])
-#var vec2 = simd.vector([5, 6, 7, 8])
-#var result = simd.add(vec1, vec2)  // Parallel addition
+var vec1 = simd.vector([1, 2, 3, 4])
+var vec2 = simd.vector([5, 6, 7, 8])
+var result = simd.add(vec1, vec2)  // Parallel addition
 ```
 
 ### 7.3 Parallel Processing
 ```sub
-#parallel for i in range(1000)
+parallel for i in range(1000)
     // Runs in parallel threads
-    #process(i)
-#end
+    process(i)
+end
 ```
 
 ## 8. File Extension
@@ -383,21 +379,21 @@ var, function, if, elif, else, for, while, do, return, end, embed, endembed, ui,
 ### 11.1 Build Configuration
 ```sub
 // build.sb - Build configuration file
-#config
+config
     name: "MyApp"
     version: "1.0.0"
     targets: ["android", "ios", "web"]
     optimize: true
     minify: true
-#end
+end
 ```
 
 ### 11.2 Dependencies
 ```sub
-#dependencies
+dependencies
     "math-lib": "^2.0.0"
     "ui-toolkit": "1.5.3"
-#end
+end
 ```
 
 ## 12. Interoperability
@@ -409,12 +405,12 @@ var, function, if, elif, else, for, while, do, return, end, embed, endembed, ui,
 
 ### 12.2 Foreign Function Interface (FFI)
 ```sub
-#ffi
+ffi
     library: "mylib.so"
     function calculateSum(a:int, b:int):int
-#end
+end
 
-#var result = calculateSum(5, 10)
+var result = calculateSum(5, 10)
 ```
 
 ## 13. Debugging Features

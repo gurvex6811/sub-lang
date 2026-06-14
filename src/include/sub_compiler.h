@@ -17,9 +17,7 @@
 
 /* Token Types for Lexical Analysis */
 typedef enum {
-    // Hash and Basic
-    TOKEN_HASH,           // #
-    
+    // Basic Tokens
     // Keywords
     TOKEN_VAR,            // var
     TOKEN_CONST,          // const
@@ -281,7 +279,6 @@ ASTNode* parser_parse_statement(CompilerContext *ctx);
 // Semantic Analysis
 int semantic_analyze(ASTNode *ast);
 int semantic_check_types(ASTNode *ast);
-bool semantic_type_check(ASTNode *node);
 DataType semantic_infer_type(ASTNode *node);
 
 // Symbol Table
@@ -306,18 +303,22 @@ char* codegen_embed_cpp(const char *cpp_code);
 char* codegen_embed_c(const char *c_code);
 void optimize_c_output(ASTNode *node);
 
-// Optimization
-void optimizer_optimize(ASTNode *ast, int level);
-void optimizer_constant_folding(ASTNode *ast);
-void optimizer_dead_code_elimination(ASTNode *ast);
-void optimizer_inline_expansion(ASTNode *ast);
+/* Multi-language transpilation */
+char* codegen_python(ASTNode *ast, const char *source);
+char* codegen_javascript(ASTNode *ast, const char *source);
+char* codegen_java(ASTNode *ast, const char *source);
+char* codegen_swift(ASTNode *ast, const char *source);
+char* codegen_kotlin(ASTNode *ast, const char *source);
+char* codegen_rust(ASTNode *ast, const char *source);
+char* codegen_go(ASTNode *ast, const char *source);
+char* codegen_ruby(ASTNode *ast, const char *source);
+char* codegen_assembly(ASTNode *ast, const char *source);
 
 // Utility Functions
 char* read_file(const char *filename);
 void write_file(const char *filename, const char *content);
 void compile_error(const char *message, int line);
 void compile_error_with_col(const char *message, int line, int column);
-void compile_warning(const char *message, int line);
 
 // Compiler Interface
 CompilerContext* compiler_create(const char *source_file);

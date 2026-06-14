@@ -684,23 +684,7 @@ static ASTNode* parse_block_until(ParserState *state, bool stop_on_else) {
             break;
         }
 
-        /* Check for #end, #elif, #else (with # prefix) */
-        if (match(state, TOKEN_HASH)) {
-            Token *next = peek_token(state, 1);
-            if (next && next->type == TOKEN_END) {
-                /* Consume the # but leave END for the caller */
-                advance(state);
-                break;
-            }
-            if (stop_on_else && next &&
-                (next->type == TOKEN_ELIF || next->type == TOKEN_ELSE)) {
-                /* Consume the # but leave elif/else for the caller */
-                advance(state);
-                break;
-            }
-            /* Not a block terminator — rewind so parse_statement sees the # */
-            /* (don't advance, let parse_statement handle the #) */
-        }
+
 
         ASTNode *stmt = parse_statement(state);
         if (stmt) {
@@ -730,12 +714,9 @@ static ASTNode* parse_block(ParserState *state, bool stop_on_else) {
 }
 
 static ASTNode* parse_embed_block(ParserState *state) {
-    Token *hash = peek_token(state, -1);
-    Token *embed = expect(state, TOKEN_EMBED, "Expected 'embed' after '#'");
+    Token *embed = expect(state, TOKEN_EMBED, "Expected 'embed'");
     if (!embed) return NULL;
-    if (!hash || hash->type != TOKEN_HASH) {
-        hash = embed;
-    }
+    Token *hash = embed;
 
     Token *lang = current_token(state);
     if (!lang) return NULL;
@@ -751,8 +732,7 @@ static ASTNode* parse_embed_block(ParserState *state) {
     }
 
     while (!match(state, TOKEN_EOF)) {
-        if (match(state, TOKEN_HASH) && peek_token(state, 1)->type == TOKEN_ENDEMBED) {
-            advance(state);
+        if (match(state, TOKEN_ENDEMBED)) {
             advance(state);
             break;
         }
@@ -1030,18 +1010,8 @@ static ASTNode* parse_statement(ParserState *state) {
     Token *tok = current_token(state);
     if (!tok) return NULL;
 
-    /* SUB language uses '#' before keywords: #var, #print, #if, etc.
-       Consume the '#' prefix so subsequent keyword checks work. */
-    if (match(state, TOKEN_HASH)) {
-        /* Special case: #embed ... #endembed blocks */
-        if (peek_token(state, 1)->type == TOKEN_EMBED) {
-            advance(state);
-            return parse_embed_block(state);
-        }
-        /* For all other # keywords, just consume the hash and fall through */
-        advance(state);
-        tok = current_token(state);
-        if (!tok) return NULL;
+    if (match(state, TOKEN_EMBED)) {
+        return parse_embed_block(state);
     }
 
     if (match(state, TOKEN_VAR)) {

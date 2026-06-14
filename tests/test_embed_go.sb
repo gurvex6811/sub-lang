@@ -1,7 +1,7 @@
 // Test file for embedded Go code extraction
 // This file tests the Go code generator's embedded code handling
 
-#embed go
+embed go
 package main
 
 import "fmt"
@@ -13,4 +13,4 @@ func main() {
         fmt.Printf("Count: %d\n", i)
     }
 }
-#endembed
+endembed

@@ -10,7 +10,7 @@ COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
 # Source files for the native compiler (subc)
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_native.c src/core/utils.c
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/ir/ir.c src/codegen/codegen_native.c src/codegen/codegen_x64.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
 

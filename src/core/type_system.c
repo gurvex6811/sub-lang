@@ -151,6 +151,11 @@ TypeInfo* type_infer_from_node(ASTNode *node) {
     
     switch (node->type) {
         case AST_LITERAL:
+            /* Check data_type first (set by parser), fall back to value inspection */
+            if (node->data_type == TYPE_STRING) return type_info_create(SUB_TYPE_STRING);
+            if (node->data_type == TYPE_INT) return type_info_create(SUB_TYPE_INT);
+            if (node->data_type == TYPE_FLOAT) return type_info_create(SUB_TYPE_FLOAT);
+            if (node->data_type == TYPE_BOOL) return type_info_create(SUB_TYPE_BOOL);
             return type_info_create(type_infer_from_literal(node->value));
             
         case AST_IDENTIFIER:

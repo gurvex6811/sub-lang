@@ -53,6 +53,8 @@ target/
 # Test outputs
 *_output.txt
 test_output/
+output.*
+output_*
 
 # Generated transpiled files (allow in examples/tests)
 *.py

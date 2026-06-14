@@ -1013,14 +1013,35 @@ char* codegen_java(ASTNode *ast, const char *source) {
     }
 
     sb_append(sb, "public class SubProgram {\n");
-    generate_node_java(sb, ast, 1);
-    
-    // Add main method wrapper if not present
+
+    /* Two-pass approach: functions and non-function statements separated */
+    StringBuilder *main_sb = sb_create();
+    if (!main_sb) {
+        sb_free(sb);
+        return NULL;
+    }
+
+    if (ast->type == AST_PROGRAM) {
+        /* Pass 1: emit function declarations as static methods */
+        for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
+            if (stmt->type == AST_FUNCTION_DECL) {
+                generate_node_java(sb, stmt, 1);
+            }
+        }
+        /* Pass 2: collect all non-function statements for main */
+        for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
+            if (stmt->type != AST_FUNCTION_DECL) {
+                generate_node_java(main_sb, stmt, 2);
+            }
+        }
+    }
+
     sb_append(sb, "\n    public static void main(String[] args) {\n");
-    sb_append(sb, "        // Entry point\n");
+    sb_append(sb, "%s", main_sb->buffer);
     sb_append(sb, "    }\n");
     sb_append(sb, "}\n");
-    
+
+    sb_free(main_sb);
     return sb_to_string(sb);
 }
 
@@ -1107,9 +1128,73 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             sb_append(sb, "}\n"); break;
         case AST_IF_STMT:
-            indent_code(sb, indent); sb_append(sb, "if "); generate_expr_swift(sb, node->condition); sb_append(sb, " {\n");
+            indent_code(sb, indent);
+            sb_append(sb, "if ");
+            generate_expr_swift(sb, node->condition);
+            sb_append(sb, " {\n");
             generate_node_swift(sb, node->body, indent + 1);
-            indent_code(sb, indent); sb_append(sb, "}\n"); break;
+            indent_code(sb, indent);
+            sb_append(sb, "}");
+            if (node->right) {
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, " else if ");
+                    generate_expr_swift(sb, node->right->condition);
+                    sb_append(sb, " {\n");
+                    generate_node_swift(sb, node->right->body, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                    if (node->right->right) {
+                        ASTNode *branch = node->right->right;
+                        while (branch && branch->type == AST_IF_STMT) {
+                            sb_append(sb, " else if ");
+                            generate_expr_swift(sb, branch->condition);
+                            sb_append(sb, " {\n");
+                            generate_node_swift(sb, branch->body, indent + 1);
+                            indent_code(sb, indent);
+                            sb_append(sb, "}");
+                            branch = branch->right;
+                        }
+                        if (branch) {
+                            sb_append(sb, " else {\n");
+                            generate_node_swift(sb, branch, indent + 1);
+                            indent_code(sb, indent);
+                            sb_append(sb, "}");
+                        }
+                    }
+                } else {
+                    sb_append(sb, " else {\n");
+                    generate_node_swift(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                }
+            }
+            sb_append(sb, "\n");
+            break;
+        case AST_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "while ");
+            generate_expr_swift(sb, node->condition);
+            sb_append(sb, " {\n");
+            generate_node_swift(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        case AST_RETURN_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "return");
+            if (node->right) {
+                sb_append(sb, " ");
+                generate_expr_swift(sb, node->right);
+            }
+            sb_append(sb, "\n");
+            break;
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_expr_swift(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_swift(sb, node->right);
+            sb_append(sb, "\n");
+            break;
         case AST_BLOCK:
             for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_swift(sb, s, indent);
@@ -1217,9 +1302,73 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             sb_append(sb, "}\n"); break;
         case AST_IF_STMT:
-            indent_code(sb, indent); sb_append(sb, "if ("); generate_expr_kotlin(sb, node->condition); sb_append(sb, ") {\n");
+            indent_code(sb, indent);
+            sb_append(sb, "if (");
+            generate_expr_kotlin(sb, node->condition);
+            sb_append(sb, ") {\n");
             generate_node_kotlin(sb, node->body, indent + 1);
-            indent_code(sb, indent); sb_append(sb, "}\n"); break;
+            indent_code(sb, indent);
+            sb_append(sb, "}");
+            if (node->right) {
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, " else if (");
+                    generate_expr_kotlin(sb, node->right->condition);
+                    sb_append(sb, ") {\n");
+                    generate_node_kotlin(sb, node->right->body, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                    if (node->right->right) {
+                        ASTNode *branch = node->right->right;
+                        while (branch && branch->type == AST_IF_STMT) {
+                            sb_append(sb, " else if (");
+                            generate_expr_kotlin(sb, branch->condition);
+                            sb_append(sb, ") {\n");
+                            generate_node_kotlin(sb, branch->body, indent + 1);
+                            indent_code(sb, indent);
+                            sb_append(sb, "}");
+                            branch = branch->right;
+                        }
+                        if (branch) {
+                            sb_append(sb, " else {\n");
+                            generate_node_kotlin(sb, branch, indent + 1);
+                            indent_code(sb, indent);
+                            sb_append(sb, "}");
+                        }
+                    }
+                } else {
+                    sb_append(sb, " else {\n");
+                    generate_node_kotlin(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                }
+            }
+            sb_append(sb, "\n");
+            break;
+        case AST_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "while (");
+            generate_expr_kotlin(sb, node->condition);
+            sb_append(sb, ") {\n");
+            generate_node_kotlin(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        case AST_RETURN_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "return");
+            if (node->right) {
+                sb_append(sb, " ");
+                generate_expr_kotlin(sb, node->right);
+            }
+            sb_append(sb, "\n");
+            break;
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_expr_kotlin(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_kotlin(sb, node->right);
+            sb_append(sb, "\n");
+            break;
         case AST_BLOCK:
             for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_kotlin(sb, s, indent);
@@ -1240,8 +1389,29 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
         sb_append(sb, "%s\n", e);
         free(e);
     }
-    generate_node_kotlin(sb, ast, 0);
-    sb_append(sb, "\nfun main() {\n}\n");
+
+    /* Two-pass: functions at top-level, executable stmts in main() */
+    StringBuilder *main_sb = sb_create();
+    if (!main_sb) {
+        sb_free(sb);
+        return NULL;
+    }
+
+    if (ast->type == AST_PROGRAM) {
+        for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
+            if (stmt->type == AST_FUNCTION_DECL) {
+                generate_node_kotlin(sb, stmt, 0);
+            } else {
+                generate_node_kotlin(main_sb, stmt, 1);
+            }
+        }
+    }
+
+    sb_append(sb, "\nfun main() {\n");
+    sb_append(sb, "%s", main_sb->buffer);
+    sb_append(sb, "}\n");
+
+    sb_free(main_sb);
     return sb_to_string(sb);
 }
 char* codegen_css(ASTNode *ast, const char *source) { (void)ast; (void)source; return strdup("body { font-family: Arial; }\n"); }

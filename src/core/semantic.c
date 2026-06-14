@@ -11,8 +11,19 @@
 // Error tracking for semantic_analyze return value
 static int g_semantic_error_count = 0;
 
-#define compile_error(msg, line) do { g_semantic_error_count++; compile_error(msg, line); } while(0)
-#define compile_error_with_col(msg, line, col) do { g_semantic_error_count++; compile_error_with_col(msg, line, col); } while(0)
+// Semantic error reporting wrappers that track error count
+static void semantic_report_error(const char *msg, int line) {
+    g_semantic_error_count++;
+    fprintf(stderr, "[line %d] Semantic error: %s\n", line, msg);
+}
+
+static void semantic_report_error_with_col(const char *msg, int line, int col) {
+    g_semantic_error_count++;
+    fprintf(stderr, "[line %d, col %d] Semantic error: %s\n", line, col, msg);
+}
+
+#define compile_error(msg, line) semantic_report_error(msg, line)
+#define compile_error_with_col(msg, line, col) semantic_report_error_with_col(msg, line, col)
 
 // Symbol table entry (local) - enhanced with DataType
 typedef struct LocalSymbolEntry {
@@ -201,8 +212,7 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return TYPE_UNKNOWN;
             }
             
-            if (node->value[0] == '"' || node->value[0] == '\'') {
-                node->data_type = TYPE_STRING;
+            if (node->data_type == TYPE_STRING) {
                 return TYPE_STRING;
             }
             
@@ -308,6 +318,14 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     }
                 }
                 
+                // If either type is unknown/auto, allow the operation (dynamic typing)
+                if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
+                    right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
+                    /* Cannot determine types at compile time, allow at runtime */
+                    node->data_type = TYPE_UNKNOWN;
+                    return TYPE_UNKNOWN;
+                }
+                
                 // Type mismatch for arithmetic
                 char error_msg[512];
                 snprintf(error_msg, sizeof(error_msg),
@@ -336,6 +354,13 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     return TYPE_BOOL;
                 }
                 
+                // Auto/unknown types - allow comparison (dynamic typing)
+                if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
+                    right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
+                    node->data_type = TYPE_BOOL;
+                    return TYPE_BOOL;
+                }
+                
                 // Type mismatch for comparison
                 char error_msg[512];
                 snprintf(error_msg, sizeof(error_msg),
@@ -350,7 +375,7 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
             if (strcmp(op, "&&") == 0 || strcmp(op, "||") == 0 ||
                 strcmp(op, "and") == 0 || strcmp(op, "or") == 0) {
                 
-                if (left_type != TYPE_BOOL) {
+                if (left_type != TYPE_BOOL && left_type != TYPE_UNKNOWN && left_type != TYPE_AUTO) {
                     char error_msg[512];
                     snprintf(error_msg, sizeof(error_msg),
                              "Type error: Logical operator '%s' requires boolean, got %s on left side",
@@ -358,7 +383,7 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     compile_error(error_msg, node->line);
                 }
                 
-                if (right_type != TYPE_BOOL) {
+                if (right_type != TYPE_BOOL && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
                     char error_msg[512];
                     snprintf(error_msg, sizeof(error_msg),
                              "Type error: Logical operator '%s' requires boolean, got %s on right side",
@@ -416,6 +441,46 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
             }
             {
                 const char *fn_name = node->value ? node->value : node->left->value;
+                
+                /* Handle builtin functions */
+                if (fn_name && (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "println") == 0)) {
+                    /* print() is a builtin - type-check its arguments */
+                    for (int i = 0; i < node->child_count; i++) {
+                        check_expression_type(node->children[i], table);
+                    }
+                    node->data_type = TYPE_VOID;
+                    return TYPE_VOID;
+                }
+                if (fn_name && (strcmp(fn_name, "input") == 0)) {
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                if (fn_name && (strcmp(fn_name, "len") == 0 || strcmp(fn_name, "int") == 0 ||
+                                strcmp(fn_name, "sizeof") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
+                }
+                if (fn_name && (strcmp(fn_name, "str") == 0 || strcmp(fn_name, "type") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                if (fn_name && strcmp(fn_name, "float") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_FLOAT;
+                    return TYPE_FLOAT;
+                }
+                if (fn_name && strcmp(fn_name, "range") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_ARRAY;
+                    return TYPE_ARRAY;
+                }
+                
                 LocalSymbolEntry *entry = lookup_symbol(table, fn_name);
                 if (!entry || !entry->is_function) {
                     char error_msg[256];
@@ -679,7 +744,7 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
             
             check_statement_type(node->body, table, current_function);
-            check_statement_type(node->next, table, current_function);  // else/elif
+            if (node->right) check_statement_type(node->right, table, current_function);  // else/elif
             break;
             
         case AST_WHILE_STMT:
@@ -816,13 +881,17 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
             break;
             
+        case AST_CALL_EXPR:
+            /* Type-check function call arguments in expression context */
+            check_expression_type(node, table);
+            break;
+            
         default:
             // Recursively check child nodes
             if (node->left) check_statement_type(node->left, table, current_function);
             if (node->right) check_statement_type(node->right, table, current_function);
             if (node->body) check_statement_type(node->body, table, current_function);
             if (node->condition) check_statement_type(node->condition, table, current_function);
-            if (node->next) check_statement_type(node->next, table, current_function);
             
             if (node->children) {
                 for (int i = 0; i < node->child_count; i++) {
@@ -918,7 +987,7 @@ DataType semantic_infer_type(ASTNode *node) {
         case AST_LITERAL:
             if (!node->value) return TYPE_NULL;
             
-            if (node->value[0] == '"' || node->value[0] == '\'') return TYPE_STRING;
+            if (node->data_type == TYPE_STRING) return TYPE_STRING;
             if (strcmp(node->value, "true") == 0 || strcmp(node->value, "false") == 0) return TYPE_BOOL;
             if (strcmp(node->value, "null") == 0 || strcmp(node->value, "nil") == 0) return TYPE_NULL;
             

@@ -21,9 +21,8 @@ make all
 ### Hello World
 
 **hello.sb**
-```sub
-#var name = "World"
-#print("Hello, " + name)
+var name = "World"
+print("Hello, " + name)
 ```
 
 ### Compile & Run
@@ -91,8 +90,8 @@ make all
 
 ## ✨ Key Features
 
-🔗 **Blockchain-Inspired Syntax**
-- Uses `#` symbols for intuitive, readable code structure
+🔗 **Clean, Modern Syntax**
+- Uses clean, recognizable C-style syntax blocks
 - Beginner-friendly with a minimal learning curve
 
 ⚡ **Native Code Generation**
@@ -123,50 +122,50 @@ make all
 
 ### Variables
 ```sub
-#var name = "John"        // String
-#var age = 25             // Integer
-#var price = 19.99        // Float
-#var isActive = true      // Boolean
+var name = "John"        // String
+var age = 25             // Integer
+var price = 19.99        // Float
+var isActive = true      // Boolean
 ```
 
 ### Functions
 ```sub
-#function greet(name)
-    #return "Hello, " + name
-#end
+function greet(name) {
+    return "Hello, " + name
+}
 
-#var message = greet("Alice")
-#print(message)
+var message = greet("Alice")
+print(message)
 ```
 
 ### Control Flow
 ```sub
-#if age > 18
-    #print("Adult")
-#elif age > 13
-    #print("Teen")
-#else
-    #print("Child")
-#end
+if age > 18 {
+    print("Adult")
+} elif age > 13 {
+    print("Teen")
+} else {
+    print("Child")
+}
 ```
 
 ### Loops
 ```sub
-#for i in range(10)
-    #print(i)
-#end
+for i in range(10) {
+    print(i)
+}
 
-#while count > 0
-    #print(count)
+while count > 0 {
+    print(count)
     count = count - 1
-#end
+}
 ```
 
 ### Embedded Native Code
 ```sub
-#embed go
-fmt.Println("This is native Go code!")
-#endembed
+embed go {
+    fmt.Println("This is native Go code!")
+}
 ```
 
 ---

@@ -197,8 +197,8 @@ static void skip_whitespace_and_comments(Lexer *L) {
             continue;
         }
 
-        /* Single-line comment: // ... */
-        if (c == '/' && peek_next(L) == '/') {
+        /* Single-line comment: // ... or # ... */
+        if ((c == '/' && peek_next(L) == '/') || c == '#') {
             while (peek(L) && peek(L) != '\n')
                 advance(L);
             continue;
@@ -393,7 +393,6 @@ static Token scan_operator_or_punct(Lexer *L) {
         case ';': return make_token(TOKEN_SEMICOLON, ";", L->line, start_col);
         case '?': return make_token(TOKEN_QUESTION,  "?", L->line, start_col);
         case ':': return make_token(TOKEN_COLON,     ":", L->line, start_col);
-        case '#': return make_token(TOKEN_HASH,      "#", L->line, start_col);
         case '@': return make_token(TOKEN_OPERATOR,  "@", L->line, start_col);
 
         /* ── Dot or ".." range ── */
@@ -479,7 +478,7 @@ static Token scan_operator_or_punct(Lexer *L) {
 static int is_operator_or_punct_start(char c) {
     return  c == '(' || c == ')' || c == '{' || c == '}' ||
             c == '[' || c == ']' || c == ',' || c == ';' ||
-            c == '?' || c == ':' || c == '#' || c == '@' ||
+            c == '?' || c == ':' || c == '@' ||
             c == '.' || c == '+' || c == '-' || c == '*' ||
             c == '/' || c == '%' || c == '=' || c == '!' ||
             c == '<' || c == '>' || c == '&' || c == '|' ||
@@ -583,7 +582,6 @@ void lexer_free_tokens(Token *tokens, int count) {
 
 const char* token_type_to_string(TokenType type) {
     switch (type) {
-        case TOKEN_HASH:           return "HASH";
         case TOKEN_VAR:            return "VAR";
         case TOKEN_CONST:          return "CONST";
         case TOKEN_LET:            return "LET";

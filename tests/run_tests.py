@@ -7,14 +7,18 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
-# Try to find compiler in root or current dir
-COMPILER = os.path.join(ROOT_DIR, "sublang")
-if not os.path.exists(COMPILER):
-    COMPILER = "./sublang"
+import sys
 
-NATIVE_COMPILER = os.path.join(ROOT_DIR, "subc-native")
+# Try to find compiler in root or current dir
+EXE_EXT = ".exe" if sys.platform == "win32" else ""
+COMPILER = os.path.join(ROOT_DIR, "sub" + EXE_EXT)
+if not os.path.exists(COMPILER):
+    COMPILER = "./sub" + EXE_EXT
+
+NATIVE_COMPILER = os.path.join(ROOT_DIR, "subc" + EXE_EXT)
 if not os.path.exists(NATIVE_COMPILER):
-    NATIVE_COMPILER = "./subc-native"
+    NATIVE_COMPILER = "./subc" + EXE_EXT
+
 
 TEST_FILE = os.path.join(ROOT_DIR, "examples/comprehensive_test.sb")
 UNIVERSAL_TEST = os.path.join(ROOT_DIR, "examples/universal_test.sb")

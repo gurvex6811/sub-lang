@@ -20,8 +20,11 @@ void compile_error_with_col(const char *message, int line, int column) {
 
 // String utilities
 char* string_concat(const char *s1, const char *s2) {
+    if (!s1) return s2 ? strdup(s2) : NULL;
+    if (!s2) return strdup(s1);
     size_t len = strlen(s1) + strlen(s2) + 1;
     char *result = malloc(len);
+    if (!result) return NULL;
     strcpy(result, s1);
     strcat(result, s2);
     return result;
@@ -29,21 +32,13 @@ char* string_concat(const char *s1, const char *s2) {
 
 // Print token (for debugging)
 void print_token(Token *token) {
-    const char *type_names[] = {
-        "HASH", "VAR", "FUNCTION", "IF", "ELIF", "ELSE",
-        "FOR", "WHILE", "RETURN", "END", "EMBED", "ENDEMBED",
-        "UI", "IDENTIFIER", "NUMBER", "STRING", "OPERATOR",
-        "LPAREN", "RPAREN", "LBRACE", "RBRACE", "DOT", "COMMA",
-        "NEWLINE", "EOF"
-    };
-    
-    if (token->type < sizeof(type_names) / sizeof(char*)) {
-        printf("Token: %-12s ", type_names[token->type]);
-        if (token->value) {
-            printf("Value: '%s'", token->value);
-        }
-        printf(" at line %d, col %d\n", token->line, token->column);
+    if (!token) return;
+    const char *name = token_type_to_string(token->type);
+    printf("Token: %-12s ", name);
+    if (token->value) {
+        printf("Value: '%s'", token->value);
     }
+    printf(" at line %d, col %d\n", token->line, token->column);
 }
 
 // Print AST (for debugging)
@@ -52,20 +47,28 @@ void print_ast(ASTNode *node, int depth) {
     
     for (int i = 0; i < depth; i++) printf("  ");
     
-    const char *type_names[] = {
-        "PROGRAM", "VAR_DECL", "FUNCTION_DECL", "IF_STMT",
-        "FOR_STMT", "WHILE_STMT", "RETURN_STMT", "ASSIGN_STMT",
-        "CALL_EXPR", "BINARY_EXPR", "IDENTIFIER", "LITERAL",
-        "BLOCK", "UI_COMPONENT", "EMBED_CODE"
+    const char *node_names[] = {
+        "PROGRAM", "VAR_DECL", "CONST_DECL", "FUNCTION_DECL",
+        "ARROW_FUNCTION", "CLASS_DECL", "IF_STMT", "FOR_STMT",
+        "WHILE_STMT", "DO_WHILE_STMT", "TRY_STMT", "CATCH_CLAUSE",
+        "FINALLY_CLAUSE", "THROW_STMT", "RETURN_STMT", "BREAK_STMT",
+        "CONTINUE_STMT", "ASSIGN_STMT", "CALL_EXPR", "BINARY_EXPR",
+        "UNARY_EXPR", "TERNARY_EXPR", "IDENTIFIER", "LITERAL",
+        "BLOCK", "UI_COMPONENT", "EMBED_CODE", "EMBED_CPP",
+        "EMBED_C", "ARRAY_LITERAL", "OBJECT_LITERAL", "MEMBER_ACCESS",
+        "ARRAY_ACCESS", "NEW_EXPR", "RANGE_EXPR", "ARRAY_ITERATION",
+        "PARAM_DECL"
     };
     
-    if (node->type < sizeof(type_names) / sizeof(char*)) {
-        printf("%s", type_names[node->type]);
-        if (node->value) {
-            printf(": %s", node->value);
-        }
-        printf("\n");
+    if (node->type < sizeof(node_names) / sizeof(char*)) {
+        printf("%s", node_names[node->type]);
+    } else {
+        printf("UNKNOWN(%d)", node->type);
     }
+    if (node->value) {
+        printf(": %s", node->value);
+    }
+    printf("\n");
     
     if (node->left) print_ast(node->left, depth + 1);
     if (node->right) print_ast(node->right, depth + 1);
@@ -376,9 +379,11 @@ void compiler_free(CompilerContext *ctx) {
 // allow the linker to resolve these symbols when the real definitions are absent.
 // GCC, Clang, and MinGW all support __attribute__((weak)). When the transpiler
 // links the real implementations from sub.c, they override these stubs.
+#ifndef _MSC_VER
 __attribute__((weak)) char* read_file(const char *f) { (void)f; return NULL; }
 __attribute__((weak)) void write_file(const char *f, const char *c) { (void)f; (void)c; }
 __attribute__((weak)) char* codegen_generate(ASTNode *a, Platform p) { (void)a; (void)p; return NULL; }
+#endif
 
 bool compiler_compile(CompilerContext *ctx) {
     if (!ctx || !ctx->source_file) {
@@ -597,44 +602,4 @@ const char* platform_get_compiler(Platform platform, bool use_cpp) {
     }
 }
 
-/* ========================================
-   C++ CodeGen Helper Functions
-   ======================================== */
-
-// Get default C++ codegen options
-void codegen_cpp_get_default_options(CPPVersion version, CPPCodegenOptions *options) {
-    if (!options) return;
-    
-    options->version = version;
-    options->use_std_string = true;
-    options->use_auto = (version >= CPP_VER_14);
-    options->use_concepts = (version >= CPP_VER_20);
-    options->use_modules = false;
-    options->use_range_based_for = true;
-    options->use_constexpr = (version >= CPP_VER_14);
-}
-
-// Convert C++ version to string
-const char* codegen_cpp_version_to_string(CPPVersion version) {
-    switch (version) {
-        case CPP_VER_11: return "C++11";
-        case CPP_VER_14: return "C++14";
-        case CPP_VER_17: return "C++17";
-        case CPP_VER_20: return "C++20";
-        case CPP_VER_23: return "C++23";
-        default: return "C++11";
-    }
-}
-
-// Parse C++ version string
-CPPVersion codegen_cpp_parse_version(const char *version_str) {
-    if (!version_str) return CPP_VER_11;
-    
-    if (strcmp(version_str, "11") == 0 || strcmp(version_str, "C++11") == 0) return CPP_VER_11;
-    if (strcmp(version_str, "14") == 0 || strcmp(version_str, "C++14") == 0) return CPP_VER_14;
-    if (strcmp(version_str, "17") == 0 || strcmp(version_str, "C++17") == 0) return CPP_VER_17;
-    if (strcmp(version_str, "20") == 0 || strcmp(version_str, "C++20") == 0) return CPP_VER_20;
-    if (strcmp(version_str, "23") == 0 || strcmp(version_str, "C++23") == 0) return CPP_VER_23;
-    
-    return CPP_VER_11;
-}
+/* C++ CodeGen helper functions are now in codegen_cpp.c */

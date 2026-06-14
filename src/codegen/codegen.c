@@ -265,11 +265,34 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             
         case AST_BINARY_EXPR:
             if (node->left) {
-                sb_append(sb, "(");
-                generate_expression(sb, node->left);
-                sb_append(sb, " %s ", node->value ? node->value : "+");
-                generate_expression(sb, node->right);
-                sb_append(sb, ")");
+                /* String concatenation: "str" + expr or expr + "str" */
+                if (node->value && strcmp(node->value, "+") == 0 &&
+                    (node->data_type == TYPE_STRING ||
+                     (node->left && node->left->data_type == TYPE_STRING) ||
+                     (node->right && node->right->data_type == TYPE_STRING))) {
+                    /* Generate runtime string concat via sprintf */
+                    sb_append(sb, "({char _buf[1024]; snprintf(_buf, sizeof(_buf), \"");
+                    /* Build format string */
+                    if (node->left->data_type == TYPE_STRING) sb_append(sb, "%%s");
+                    else if (node->left->data_type == TYPE_INT) sb_append(sb, "%%ld");
+                    else if (node->left->data_type == TYPE_FLOAT) sb_append(sb, "%%f");
+                    else sb_append(sb, "%%s");
+                    if (node->right->data_type == TYPE_STRING) sb_append(sb, "%%s");
+                    else if (node->right->data_type == TYPE_INT) sb_append(sb, "%%ld");
+                    else if (node->right->data_type == TYPE_FLOAT) sb_append(sb, "%%f");
+                    else sb_append(sb, "%%s");
+                    sb_append(sb, "\", ");
+                    generate_expression(sb, node->left);
+                    sb_append(sb, ", ");
+                    generate_expression(sb, node->right);
+                    sb_append(sb, "); sub_strdup(_buf);})");
+                } else {
+                    sb_append(sb, "(");
+                    generate_expression(sb, node->left);
+                    sb_append(sb, " %s ", node->value ? node->value : "+");
+                    generate_expression(sb, node->right);
+                    sb_append(sb, ")");
+                }
             }
             break;
             
@@ -285,11 +308,31 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             if (node->value) {
                 /* Map SUB print() to C printf() */
                 if (strcmp(node->value, "print") == 0) {
-                    sb_append(sb, "printf(\"%%s\\n\", ");
                     if (node->child_count > 0) {
-                        generate_expression(sb, node->children[0]);
+                        ASTNode *arg = node->children[0];
+                        const char *fmt = "%s";
+                        if (arg->data_type == TYPE_INT) fmt = "%ld";
+                        else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                        else if (arg->data_type == TYPE_BOOL) fmt = "%d";
+                        else if (arg->data_type == TYPE_STRING) fmt = "%s";
+                        else if (arg->type == AST_LITERAL && arg->value) {
+                            /* Infer from literal value if data_type not set */
+                            char *end;
+                            (void)strtol(arg->value, &end, 10);
+                            if (*end == '\0') fmt = "%ld";
+                            else {
+                                (void)strtod(arg->value, &end);
+                                if (*end == '\0') fmt = "%f";
+                            }
+                        } else if (arg->type == AST_BINARY_EXPR) {
+                            /* Binary expressions: check if arithmetic or string concat */
+                            if (arg->data_type == TYPE_INT) fmt = "%ld";
+                            else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                        }
+                        sb_append(sb, "printf(\"%s\\n\", ", fmt);
+                        generate_expression(sb, arg);
                     } else {
-                        sb_append(sb, "\"\"");
+                        sb_append(sb, "printf(\"\\n\"");
                     }
                     sb_append(sb, ")");
                 } else {
@@ -376,6 +419,23 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             else if (node->data_type == TYPE_FLOAT) ret_type = "double";
             else if (node->data_type == TYPE_STRING) ret_type = "char*";
             else if (node->data_type == TYPE_BOOL) ret_type = "bool";
+            else {
+                /* If data_type is unknown, scan body for return statements */
+                ASTNode *body_stmt = node->body ? (node->body->body ? node->body->body : 
+                    (node->body->children ? node->body->children[0] : node->body)) : NULL;
+                while (body_stmt) {
+                    if (body_stmt->type == AST_RETURN_STMT) {
+                        if (body_stmt->right) {
+                            if (body_stmt->right->data_type == TYPE_STRING) { ret_type = "char*"; break; }
+                            else if (body_stmt->right->data_type == TYPE_FLOAT) { ret_type = "double"; break; }
+                            else if (body_stmt->right->data_type == TYPE_BOOL) { ret_type = "bool"; break; }
+                            else { ret_type = "long"; break; } /* default to long for numeric returns */
+                        }
+                        break;
+                    }
+                    body_stmt = body_stmt->next;
+                }
+            }
             sb_append(sb, "\n%s %s(", ret_type, node->value ? node->value : "func");
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
@@ -552,20 +612,30 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "} while(0)\n");
     sb_append(sb, "#endif /* SUB_ERROR_H */\n\n");
     
-    // Generate code from AST
-    generate_node(sb, ast, 0);
+    /* Pass 1: Generate function declarations at file scope */
+    if (ast && (ast->type == AST_PROGRAM || ast->type == AST_BLOCK)) {
+        for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
+            if (stmt->type == AST_FUNCTION_DECL) {
+                generate_node(sb, stmt, 0);
+            }
+        }
+    }
     
-    // Add main function wrapper if not present
-    sb_append(sb, "/* Auto-generated main if not defined */\n");
-    sb_append(sb, "#ifndef MAIN_DEFINED\n");
+    /* Pass 2: Wrap non-function top-level statements in main() */
     sb_append(sb, "int main(int argc, char *argv[]) {\n");
     sb_append(sb, "    (void)argc;\n");
     sb_append(sb, "    (void)argv;\n");
-    sb_append(sb, "    printf(\"SUB Language Program Running...\\n\");\n");
+    
+    if (ast && (ast->type == AST_PROGRAM || ast->type == AST_BLOCK)) {
+        for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
+            if (stmt->type != AST_FUNCTION_DECL) {
+                generate_node(sb, stmt, 1);
+            }
+        }
+    }
+    
     sb_append(sb, "    return EXIT_SUCCESS;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "#define MAIN_DEFINED 1\n");
-    sb_append(sb, "#endif /* MAIN_DEFINED */\n");
     
     return sb_to_string(sb);
 }
@@ -620,7 +690,169 @@ static char* generate_ios(ASTNode *ast UNUSED) {
     return sb_to_string(sb);
 }
 
-static char* generate_web(ASTNode *ast UNUSED) {
+/* Helper: generate JavaScript expression from AST node */
+static void generate_js_expression(StringBuilder *sb, ASTNode *node) {
+    if (!node) return;
+    switch (node->type) {
+        case AST_LITERAL:
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else {
+                sb_append(sb, "%s", node->value ? node->value : "0");
+            }
+            break;
+        case AST_IDENTIFIER:
+            sb_append(sb, "%s", node->value ? node->value : "x");
+            break;
+        case AST_BINARY_EXPR:
+            sb_append(sb, "(");
+            generate_js_expression(sb, node->left);
+            sb_append(sb, " %s ", node->value ? node->value : "+");
+            generate_js_expression(sb, node->right);
+            sb_append(sb, ")");
+            break;
+        case AST_CALL_EXPR:
+            if (node->value && strcmp(node->value, "print") == 0) {
+                sb_append(sb, "console.log(");
+                if (node->child_count > 0) generate_js_expression(sb, node->children[0]);
+                sb_append(sb, ")");
+            } else {
+                sb_append(sb, "%s(", node->value ? node->value : "func");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_js_expression(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+/* Helper: generate JavaScript statement from AST node */
+static void generate_js_node(StringBuilder *sb, ASTNode *node, int indent) {
+    if (!node) return;
+    switch (node->type) {
+        case AST_PROGRAM:
+        case AST_BLOCK:
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
+                generate_js_node(sb, stmt, indent);
+            }
+            break;
+        case AST_VAR_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "let %s", node->value ? node->value : "x");
+            if (node->right) {
+                sb_append(sb, " = ");
+                generate_js_expression(sb, node->right);
+            }
+            sb_append(sb, ";\n");
+            break;
+        case AST_CONST_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "const %s = ", node->value ? node->value : "x");
+            generate_js_expression(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+        case AST_CALL_EXPR:
+            indent_code(sb, indent);
+            generate_js_expression(sb, node);
+            sb_append(sb, ";\n");
+            break;
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_js_expression(sb, node->left);
+            sb_append(sb, " = ");
+            generate_js_expression(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+        case AST_FUNCTION_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "function %s(", node->value ? node->value : "func");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "%s", node->children[i]->value ? node->children[i]->value : "arg");
+            }
+            sb_append(sb, ") {\n");
+            if (node->body) generate_js_node(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        case AST_IF_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "if (");
+            generate_js_expression(sb, node->condition);
+            sb_append(sb, ") {\n");
+            generate_js_node(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            if (node->right) {
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, "} else ");
+                    generate_js_node(sb, node->right, indent);
+                } else {
+                    sb_append(sb, "} else {\n");
+                    generate_js_node(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}\n");
+                }
+            } else {
+                sb_append(sb, "}\n");
+            }
+            break;
+        case AST_FOR_STMT: {
+            indent_code(sb, indent);
+            const char *var = node->value ? node->value : "i";
+            if (node->children && node->child_count > 0 && node->children[0]->type == AST_RANGE_EXPR) {
+                ASTNode *range = node->children[0];
+                sb_append(sb, "for (let %s = ", var);
+                if (range->right) {
+                    if (range->left) generate_js_expression(sb, range->left);
+                    else sb_append(sb, "0");
+                    sb_append(sb, "; %s < ", var);
+                    generate_js_expression(sb, range->right);
+                } else if (range->left) {
+                    sb_append(sb, "0; %s < ", var);
+                    generate_js_expression(sb, range->left);
+                } else {
+                    sb_append(sb, "0; %s < 10", var);
+                }
+                sb_append(sb, "; %s++) {\n", var);
+            } else {
+                sb_append(sb, "for (let %s = 0; %s < 10; %s++) {\n", var, var, var);
+            }
+            generate_js_node(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
+        case AST_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "while (");
+            generate_js_expression(sb, node->condition);
+            sb_append(sb, ") {\n");
+            generate_js_node(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        case AST_RETURN_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "return");
+            if (node->right) {
+                sb_append(sb, " ");
+                generate_js_expression(sb, node->right);
+            }
+            sb_append(sb, ";\n");
+            break;
+        default:
+            for (int i = 0; i < node->child_count; i++) {
+                generate_js_node(sb, node->children[i], indent);
+            }
+            break;
+    }
+}
+
+static char* generate_web(ASTNode *ast) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -628,18 +860,20 @@ static char* generate_web(ASTNode *ast UNUSED) {
     sb_append(sb, "<html>\n<head>\n");
     sb_append(sb, "    <title>SUB Language App</title>\n");
     sb_append(sb, "    <style>\n");
-    sb_append(sb, "        body { font-family: Arial, sans-serif; margin: 20px; }\n");
+    sb_append(sb, "        body { font-family: Arial, sans-serif; margin: 20px; padding: 20px; }\n");
+    sb_append(sb, "        #output { background: #1a1a2e; color: #e0e0e0; padding: 20px; border-radius: 8px; font-family: monospace; white-space: pre-wrap; }\n");
     sb_append(sb, "    </style>\n");
     sb_append(sb, "</head>\n<body>\n");
     sb_append(sb, "    <h1>SUB Language Application</h1>\n");
-    sb_append(sb, "    <div id='app'></div>\n");
+    sb_append(sb, "    <div id='output'></div>\n");
     sb_append(sb, "    <script>\n");
+    sb_append(sb, "    // Generated from SUB Language Compiler\n");
+    sb_append(sb, "    const _out = document.getElementById('output');\n");
+    sb_append(sb, "    const _origLog = console.log;\n");
+    sb_append(sb, "    console.log = function(...args) { _out.textContent += args.join(' ') + '\\n'; _origLog.apply(console, args); };\n\n");
     
-    // Generate JavaScript from AST
-    sb_append(sb, "    // Generated from SUB Language\n");
-    sb_append(sb, "    console.log('SUB App Initialized');\n");
-    
-    // TODO: Convert AST nodes to JavaScript
+    /* Generate JavaScript from AST */
+    generate_js_node(sb, ast, 1);
     
     sb_append(sb, "    </script>\n");
     sb_append(sb, "</body>\n</html>\n");
@@ -648,24 +882,8 @@ static char* generate_web(ASTNode *ast UNUSED) {
 }
 
 static char* generate_windows(ASTNode *ast) {
-    // For Windows, generate C code with Windows headers
-    StringBuilder *sb = sb_create();
-    if (!sb) return NULL;
-    
-    sb_append(sb, "// Windows Application Generated from SUB Language\n");
-    sb_append(sb, "#include <windows.h>\n");
-    sb_append(sb, "#include <stdio.h>\n\n");
-    
-    // Generate the actual SUB code
-    generate_node(sb, ast, 0);
-    
-    sb_append(sb, "\nint WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,\n");
-    sb_append(sb, "                   LPSTR lpCmdLine, int nCmdShow) {\n");
-    sb_append(sb, "    MessageBox(NULL, \"SUB Language App\", \"Running\", MB_OK);\n");
-    sb_append(sb, "    return 0;\n");
-    sb_append(sb, "}\n");
-    
-    return sb_to_string(sb);
+    /* For Windows, generate standard C console application */
+    return generate_c_code(ast);
 }
 
 static char* generate_linux(ASTNode *ast) {

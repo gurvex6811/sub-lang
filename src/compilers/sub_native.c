@@ -221,7 +221,11 @@ int main(int argc, char *argv[]) {
     if (emit_asm) {
         snprintf(asm_file, sizeof(asm_file), "%s", output_file);
     } else {
+#ifdef _WIN32
+        snprintf(asm_file, sizeof(asm_file), "sub_temp_%d.s", getpid());
+#else
         snprintf(asm_file, sizeof(asm_file), "/tmp/sub_temp_%d.s", getpid());
+#endif
     }
     
     write_file_native(asm_file, asm_code);
@@ -262,8 +266,7 @@ int main(int argc, char *argv[]) {
                      asm_file, getpid(), getpid(), output_file);
         }
 #elif defined(_WIN32)
-        snprintf(cmd, sizeof(cmd), "ml64 /c /Fo%s.obj %s >nul 2>&1 && link /SUBSYSTEM:CONSOLE %s.obj /OUT:%s >nul 2>&1",
-                 output_file, asm_file, output_file, output_file);
+        snprintf(cmd, sizeof(cmd), "gcc -o %s %s 2>nul", output_file, asm_file);
 #else
         if (options.target == NATIVE_TARGET_ARM64) {
             snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib/ld-linux-aarch64.so.1 2>/dev/null",
