@@ -1,171 +1,141 @@
-/* ========================================
-   SUB Language - Native Compiler Driver
-   Compiles SUB directly to native machine code via C backend + GCC
-   File: sub_native_compiler.c
-   ======================================== */
+/* ===================================================
+   SUB Native Compiler — C-backend path
+   Compiles .sb source → C → machine binary via gcc/cc
+   =================================================== */
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
-#include "windows_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #ifdef _WIN32
-#include <process.h>
-#define popen  _popen
-#define pclose _pclose
+#  define PATH_SEP '\\'
+#  define NULL_DEV "NUL"
 #else
-#include <unistd.h>
-#include <sys/wait.h>
+#  define PATH_SEP '/'
+#  define NULL_DEV "/dev/null"
 #endif
 
-/* codegen_generate_c is in codegen.c */
-extern char* codegen_generate_c(ASTNode *ast, Platform platform);
+/* ---- helpers ---- */
 
-/* Read file */
-static char* read_file_native(const char *filename) {
-    FILE *f = fopen(filename, "r");
-    if (!f) { fprintf(stderr, "Error: Cannot open file %s\n", filename); return NULL; }
-    fseek(f, 0, SEEK_END); long size = ftell(f); fseek(f, 0, SEEK_SET);
-    char *buf = malloc(size + 1);
+static char *read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "subc: cannot open '%s'\n", path); return NULL; }
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = malloc(sz + 1);
     if (!buf) { fclose(f); return NULL; }
-    fread(buf, 1, size, f);
-    buf[size] = '\0';
-    fclose(f);
+    fread(buf, 1, sz, f); buf[sz] = '\0'; fclose(f);
     return buf;
 }
 
-/* Strip path + .sb/.sub extension to get basename */
-static void get_basename(const char *input, char *out, size_t n) {
-    const char *base = input;
-    for (const char *p = input; *p; p++)
-        if (*p == '/' || *p == '\\') base = p + 1;
-    strncpy(out, base, n - 1);
-    out[n - 1] = '\0';
-    char *dot = strrchr(out, '.');
-    if (dot && (strcmp(dot, ".sb") == 0 || strcmp(dot, ".sub") == 0))
-        *dot = '\0';
+static int write_file(const char *path, const char *content) {
+    FILE *f = fopen(path, "w");
+    if (!f) { fprintf(stderr, "subc: cannot write '%s'\n", path); return 0; }
+    fputs(content, f);
+    fclose(f);
+    return 1;
 }
 
-/* Main native compilation: SUB -> C -> gcc -> binary */
-int compile_to_native(const char *input_file, const char *output_file) {
-    printf("\n╔═══════════════════════════════════════════╗\n");
-    printf("║  SUB Native Compiler  (machine code)     ║\n");
-    printf("╚═══════════════════════════════════════════╝\n\n");
-    printf("📄 Input:  %s\n", input_file);
-    printf("🎯 Output: %s\n\n", output_file);
+/**
+ * Derive output binary name from input path:
+ *   /some/path/hello.sb  ->  hello   (same dir as caller)
+ *   hello.sb             ->  hello
+ */
+static void derive_output_name(const char *input_path, char *out, size_t outsz) {
+    /* find last separator */
+    const char *base = input_path;
+    for (const char *p = input_path; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
 
-    /* --- Phase 1: Read --- */
-    printf("[1/5] 📖 Reading source...\n");
-    char *source = read_file_native(input_file);
+    /* strip .sb extension */
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", base);
+    char *dot = strrchr(tmp, '.');
+    if (dot) *dot = '\0';
+
+    snprintf(out, outsz, "%s", tmp);
+}
+
+/* ---- public entry point ---- */
+
+int compile_native(const char *input_file, const char *output_file_arg) {
+    /* 1. Read source */
+    char *source = read_file(input_file);
     if (!source) return 1;
-    printf("      ✓ %zu bytes\n", strlen(source));
 
-    /* --- Phase 2: Lex --- */
-    printf("[2/5] 🔤 Lexical analysis...\n");
-    int token_count = 0;
-    Token *tokens = lexer_tokenize(source, &token_count);
-    if (!tokens) {
-        fprintf(stderr, "      ✗ Lexer failed\n");
-        free(source); return 1;
-    }
-    printf("      ✓ %d tokens\n", token_count);
+    /* 2. Lex */
+    int ntok;
+    Token *tokens = lexer_tokenize(source, &ntok);
+    if (!tokens) { free(source); return 1; }
 
-    /* --- Phase 3: Parse --- */
-    printf("[3/5] 🌳 Parsing...\n");
-    ASTNode *ast = parser_parse(tokens, token_count);
+    /* 3. Parse */
+    ASTNode *ast = parser_parse(tokens, ntok);
     if (!ast) {
-        fprintf(stderr, "      ✗ Parse failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); return 1;
+        lexer_free_tokens(tokens, ntok); free(source); return 1;
     }
-    printf("      ✓ AST built\n");
 
-    /* --- Phase 4: Semantic --- */
-    printf("[4/5] 🔍 Semantic analysis...\n");
+    /* 4. Semantic analysis */
     if (!semantic_analyze(ast)) {
-        fprintf(stderr, "      ✗ Semantic analysis failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+        fprintf(stderr, "subc: semantic error\n");
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
-    printf("      ✓ OK\n");
 
-    /* --- Phase 5: C codegen + GCC --- */
-    printf("[5/5] ⚙️  Generating machine code via C backend + GCC...\n");
-
+    /* 5. Generate C code from AST */
     char *c_code = codegen_generate_c(ast, PLATFORM_LINUX);
     if (!c_code) {
-        fprintf(stderr, "      ✗ C code generation failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+        fprintf(stderr, "subc: C codegen failed\n");
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
 
-    /* Write C to temp file */
-    char c_tmp[512];
-#ifdef _WIN32
-    snprintf(c_tmp, sizeof(c_tmp), "%s_build_tmp.c", output_file);
-#else
-    snprintf(c_tmp, sizeof(c_tmp), "/tmp/_sub_%ld_build.c", (long)getpid());
-#endif
+    /* 6. Determine output binary name */
+    char bin_name[512];
+    if (output_file_arg && output_file_arg[0]) {
+        snprintf(bin_name, sizeof(bin_name), "%s", output_file_arg);
+    } else {
+        derive_output_name(input_file, bin_name, sizeof(bin_name));
+    }
 
-    FILE *cf = fopen(c_tmp, "w");
-    if (!cf) {
-        fprintf(stderr, "      ✗ Cannot write temp C file: %s\n", c_tmp);
-        free(c_code); free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+    /* 7. Write C file to /tmp */
+    char c_path[512];
+    snprintf(c_path, sizeof(c_path), "/tmp/sub_%s.c", bin_name);
+    if (!write_file(c_path, c_code)) {
+        free(c_code);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
-    fprintf(cf, "%s", c_code);
-    fclose(cf);
     free(c_code);
 
-    /* Invoke GCC */
+    /* 8. Invoke gcc/cc to produce a real native binary */
     char cmd[1024];
-#ifdef _WIN32
-    snprintf(cmd, sizeof(cmd), "gcc -O2 -o \"%s.exe\" \"%s\" 2>&1", output_file, c_tmp);
-#else
-    snprintf(cmd, sizeof(cmd), "gcc -O2 -o \"%s\" \"%s\" 2>&1", output_file, c_tmp);
-#endif
-    printf("      → %s\n", cmd);
-    int ret = system(cmd);
-    remove(c_tmp);  /* clean up temp */
+    /* Try gcc first, fall back to cc */
+    snprintf(cmd, sizeof(cmd),
+        "gcc -O2 -Wall -Wno-unused-variable -o %s %s 2>&1 || "
+        "cc  -O2 -Wall -Wno-unused-variable -o %s %s 2>&1",
+        bin_name, c_path, bin_name, c_path);
 
-    if (ret != 0) {
-        fprintf(stderr, "      ✗ GCC failed (exit %d) — check C code above\n", ret);
-        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr,
+            "subc: C compilation failed (exit %d).\n"
+            "  Intermediate C file: %s\n"
+            "  Run: gcc -o %s %s\n",
+            rc, c_path, bin_name, c_path);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
 
-#ifdef _WIN32
-    printf("      ✓ Binary: %s.exe\n", output_file);
-    printf("\n✅ Success!\n📦 Run: %s.exe\n\n", output_file);
-#else
-    printf("      ✓ Binary: %s\n", output_file);
-    printf("\n✅ Success!\n📦 Run: ./%s\n\n", output_file);
-#endif
+    /* 9. Clean up temp file */
+    char rm_cmd[600];
+    snprintf(rm_cmd, sizeof(rm_cmd), "rm -f %s", c_path);
+    system(rm_cmd);
 
-    free(source);
-    lexer_free_tokens(tokens, token_count);
     parser_free_ast(ast);
+    lexer_free_tokens(tokens, ntok);
+    free(source);
+
+    printf("subc: compiled '%s'  ->  ./%s\n", input_file, bin_name);
     return 0;
-}
-
-/* Entry point */
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("SUB Native Compiler v2.0\n");
-        printf("Usage: %s <input.sb> [output]\n\n", argv[0]);
-        printf("Examples:\n");
-        printf("  %s program.sb           # output: ./program\n", argv[0]);
-        printf("  %s program.sb myapp     # output: ./myapp\n\n", argv[0]);
-        return 1;
-    }
-
-    const char *input_file = argv[1];
-    char base[256];
-    get_basename(input_file, base, sizeof(base));
-    const char *output_file = argc > 2 ? argv[2] : base;
-
-    return compile_to_native(input_file, output_file);
 }

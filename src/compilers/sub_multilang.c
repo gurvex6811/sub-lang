@@ -1,217 +1,145 @@
-/* ========================================
-   SUB Language Multi-Language Compiler Driver
-   Transpile SUB code to: Python, Java, Swift, Kotlin, C, C++, Rust, JS, Assembly, CSS, Go, Ruby
-   File: sub_multilang.c
-   ======================================== */
+/* =====================================================
+   SUB Multilang Transpiler
+   Usage: subc <input.sb> <lang> [output-name]
+   Supported langs: python c js rust go java kotlin swift
+   ===================================================== */
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
-#include "logo.h"
-#include "windows_compat.h"
-#include "targets.h"
+#include "codegen_multilang.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
-/* Depth guard shared with codegen_multilang.c */
+/* Shared recursion-depth counter used by codegen functions */
 int _gen_depth = 0;
 
-/* External codegen functions (from codegen_multilang.c) */
-extern char* codegen_python(ASTNode *ast, const char *source);
-extern char* codegen_java(ASTNode *ast, const char *source);
-extern char* codegen_swift(ASTNode *ast, const char *source);
-extern char* codegen_kotlin(ASTNode *ast, const char *source);
-extern char* codegen_cpp(ASTNode *ast, const char *source);
-extern char* codegen_rust(ASTNode *ast, const char *source);
-extern char* codegen_javascript(ASTNode *ast, const char *source);
-extern char* codegen_css(ASTNode *ast, const char *source);
-extern char* codegen_ruby(ASTNode *ast, const char *source);
-extern char* codegen_go(ASTNode *ast, const char *source);
-extern char* codegen_assembly(ASTNode *ast, const char *source);
+/* ---- helpers ---- */
 
-/* From codegen.c */
-extern char* codegen_generate_c(ASTNode *ast, Platform platform);
+static char *read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "subc: cannot open '%s'\n", path); return NULL; }
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = malloc(sz + 1);
+    if (!buf) { fclose(f); return NULL; }
+    fread(buf, 1, sz, f); buf[sz] = '\0'; fclose(f);
+    return buf;
+}
 
-/* Helper: strip directory and .sb/.sub extension to get basename */
-static void get_output_basename(const char *input_file, char *out, size_t n) {
-    const char *base = input_file;
-    for (const char *p = input_file; *p; p++)
+static int write_file(const char *path, const char *content) {
+    FILE *f = fopen(path, "w");
+    if (!f) { fprintf(stderr, "subc: cannot write '%s'\n", path); return 0; }
+    fputs(content, f);
+    fclose(f);
+    return 1;
+}
+
+/**
+ * Derive output filename from input path and target language.
+ *   input: /some/path/hello.sb   lang: python  -> hello.py
+ *   input: first.sb              lang: c       -> first.c
+ *   input: first.sb              lang: js      -> first.js
+ *
+ * If `user_name` is given (non-NULL, non-empty), use it verbatim
+ * (the caller may still lack an extension, so we append the correct one).
+ */
+static void build_output_path(const char *input_path,
+                               const char *lang,
+                               const char *user_name,
+                               char *out, size_t outsz) {
+    /* Strip directory from input path */
+    const char *base = input_path;
+    for (const char *p = input_path; *p; p++)
         if (*p == '/' || *p == '\\') base = p + 1;
-    strncpy(out, base, n - 1);
-    out[n - 1] = '\0';
-    char *dot = strrchr(out, '.');
-    if (dot && (strcmp(dot, ".sb") == 0 || strcmp(dot, ".sub") == 0))
-        *dot = '\0';
-}
 
-/* Utility: Read file */
-char* read_file(const char *filename) {
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Cannot open file %s\n", filename);
-        return NULL;
-    }
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *content = malloc(size + 1);
-    if (!content) { fclose(file); return NULL; }
-    if (fread(content, 1, size, file) != (size_t)size) { /* tolerate text-mode diff */ }
-    content[size] = '\0';
-    fclose(file);
-    return content;
-}
+    /* Stem: remove extension */
+    char stem[512];
+    snprintf(stem, sizeof(stem), "%s", base);
+    char *dot = strrchr(stem, '.');
+    if (dot) *dot = '\0';
 
-/* Utility: Write file */
-void write_file(const char *filename, const char *content) {
-    FILE *file = fopen(filename, "w");
-    if (!file) { fprintf(stderr, "Error: Cannot write to file %s\n", filename); return; }
-    fprintf(file, "%s", content);
-    fclose(file);
-}
+    /* Pick extension for the target language */
+    const char *ext = ".txt";
+    if (strcmp(lang, "python")  == 0 || strcmp(lang, "py")     == 0) ext = ".py";
+    else if (strcmp(lang, "c")  == 0)                                 ext = ".c";
+    else if (strcmp(lang, "cpp")== 0 || strcmp(lang, "c++")    == 0) ext = ".cpp";
+    else if (strcmp(lang, "js") == 0 || strcmp(lang, "javascript")==0) ext = ".js";
+    else if (strcmp(lang, "ts") == 0 || strcmp(lang, "typescript")==0) ext = ".ts";
+    else if (strcmp(lang, "rust")== 0 || strcmp(lang, "rs")    == 0) ext = ".rs";
+    else if (strcmp(lang, "go") == 0 || strcmp(lang, "golang") == 0) ext = ".go";
+    else if (strcmp(lang, "java")== 0)                                ext = ".java";
+    else if (strcmp(lang, "kotlin")==0 || strcmp(lang, "kt")   == 0) ext = ".kt";
+    else if (strcmp(lang, "swift")== 0)                               ext = ".swift";
+    else if (strcmp(lang, "lua") == 0)                                ext = ".lua";
+    else if (strcmp(lang, "rb")  == 0 || strcmp(lang, "ruby")  == 0) ext = ".rb";
 
-/* Generate code for target language */
-char* generate_code(ASTNode *ast, TargetLanguage lang, const char *source) {
-    _gen_depth = 0; /* reset depth guard before each top-level codegen call */
-
-    if (lang == LANG_C) {
-        return codegen_generate_c(ast, PLATFORM_LINUX);
-    }
-
-    if (!target_is_implemented(lang)) {
-        fprintf(stderr, "%s codegen not yet implemented\n", language_to_string(lang));
-        return NULL;
-    }
-
-    CodegenFn codegen = get_codegen_for_target(language_to_string(lang));
-    if (!codegen) { fprintf(stderr, "Unknown target language\n"); return NULL; }
-
-    return codegen(ast, source);
-}
-
-/* Print usage */
-void print_usage(const char *prog_name) {
-    printf(SUB_LOGO);
-    printf("Usage: %s <input.sb> [target_language] [output_name]\n\n", prog_name);
-    printf("Supported Target Languages:\n");
-    printf("  c, cpp/c++       - C and C++\n");
-    printf("  cpp17, cpp20     - C++17, C++20\n");
-    printf("  python/py        - Python 3\n");
-    printf("  java             - Java\n");
-    printf("  swift            - Swift\n");
-    printf("  kotlin/kt        - Kotlin\n");
-    printf("  rust/rs          - Rust\n");
-    printf("  javascript/js    - JavaScript\n");
-    printf("  typescript/ts    - TypeScript\n");
-    printf("  go/golang        - Go\n");
-    printf("  assembly/asm     - x86-64 Assembly\n");
-    printf("  css              - CSS Stylesheet\n");
-    printf("  ruby/rb          - Ruby\n");
-    printf("\nExamples:\n");
-    printf("  %s hello.sb python      # -> hello.py\n", prog_name);
-    printf("  %s hello.sb python myapp # -> myapp.py\n", prog_name);
-    printf("  %s hello.sb cpp17       # -> hello.cpp\n", prog_name);
-    printf("  %s hello.sb rust        # -> hello.rs\n", prog_name);
-    printf("  %s hello.sb c           # -> hello.c\n\n", prog_name);
-}
-
-/* Main function */
-int main(int argc, char *argv[]) {
-    printf(SUB_LOGO);
-
-    if (argc < 2) {
-        print_usage(argv[0]);
-        return 1;
-    }
-
-    const char *input_file = argv[1];
-    const char *target_lang_str = argc > 2 ? argv[2] : "c";
-    TargetLanguage target_lang = parse_language(target_lang_str);
-    LanguageInfo *info = language_info_get(target_lang);
-
-    /* Derive output basename:
-       If argv[3] is given, use it as the output name (without extension).
-       Otherwise derive from the input filename: first.sb -> first */
-    char base_name[256];
-    if (argc > 3) {
-        /* User supplied explicit output name, strip any extension they may have added */
-        strncpy(base_name, argv[3], sizeof(base_name) - 1);
-        base_name[sizeof(base_name) - 1] = '\0';
-        char *dot = strrchr(base_name, '.');
-        if (dot) *dot = '\0';  /* strip extension if given */
+    /* Build output path */
+    if (user_name && user_name[0]) {
+        /* User supplied a name. If it already has the correct extension, keep it;
+           otherwise append the language extension. */
+        const char *has_ext = strrchr(user_name, '.');
+        if (has_ext && strcmp(has_ext, ext) == 0)
+            snprintf(out, outsz, "%s", user_name);
+        else
+            snprintf(out, outsz, "%s%s", user_name, ext);
     } else {
-        get_output_basename(input_file, base_name, sizeof(base_name));
+        snprintf(out, outsz, "%s%s", stem, ext);
     }
+}
 
-    /* Build output filename */
-    char output_file[512];
-    if (target_lang == LANG_JAVA) {
-        snprintf(output_file, sizeof(output_file), "SubProgram%s", info->extension);
-    } else {
-        snprintf(output_file, sizeof(output_file), "%s%s", base_name, info->extension);
-    }
+/* ---- entry point ---- */
 
-    printf("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n");
-    printf("\u2551  SUB Transpiler v2.0                      \u2551\n");
-    printf("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n");
-
-    printf("\ud83d\udcc4 Input:  %s\n", input_file);
-    printf("\ud83c\udfaf Target: %s\n", info->name);
-    printf("\ud83d\udce6 Output: %s\n\n", output_file);
-
-    /* Phase 1: Read source */
-    printf("[1/5] \ud83d\udcd6 Reading source file...\n");
+int transpile_file(const char *input_file,
+                   const char *target_lang,
+                   const char *user_output_name) {
+    /* 1. Read source */
     char *source = read_file(input_file);
     if (!source) return 1;
-    printf("      \u2713 Read %zu bytes\n", strlen(source));
 
-    /* Phase 2: Lexical Analysis */
-    printf("[2/5] \ud83d\udd24 Lexical analysis...\n");
-    int token_count;
-    Token *tokens = lexer_tokenize(source, &token_count);
-    if (!tokens) { fprintf(stderr, "      \u2717 Lexer failed\n"); free(source); return 1; }
-    printf("      \u2713 %d tokens\n", token_count);
+    /* 2. Lex */
+    int ntok;
+    Token *tokens = lexer_tokenize(source, &ntok);
+    if (!tokens) { free(source); return 1; }
 
-    /* Phase 3: Parsing */
-    printf("[3/5] \ud83c\udf33 Parsing...\n");
-    ASTNode *ast = parser_parse(tokens, token_count);
+    /* 3. Parse */
+    ASTNode *ast = parser_parse(tokens, ntok);
     if (!ast) {
-        fprintf(stderr, "      \u2717 Parse failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); return 1;
+        lexer_free_tokens(tokens, ntok); free(source); return 1;
     }
-    printf("      \u2713 AST created\n");
 
-    /* Phase 4: Semantic Analysis */
-    printf("[4/5] \ud83d\udd0d Semantic analysis...\n");
+    /* 4. Semantic analysis */
     if (!semantic_analyze(ast)) {
-        fprintf(stderr, "      \u2717 Semantic analysis failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+        fprintf(stderr, "subc: semantic error in '%s'\n", input_file);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
-    printf("      \u2713 Passed\n");
 
-    /* Phase 5: Code Generation */
-    printf("[5/5] \u2699\ufe0f  Code generation (%s)...\n", info->name);
-    char *output_code = generate_code(ast, target_lang, source);
+    /* 5. Reset depth counter and generate target-language code */
+    _gen_depth = 0;
+    char *output_code = codegen_generate(ast, target_lang);
     if (!output_code) {
-        fprintf(stderr, "      \u2717 Code generation failed\n");
-        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
+        fprintf(stderr, "subc: code generation failed for language '%s'\n", target_lang);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
 
-    write_file(output_file, output_code);
-    printf("      \u2713 Generated %zu bytes\n", strlen(output_code));
+    /* 6. Determine output filename */
+    char out_path[512];
+    build_output_path(input_file, target_lang, user_output_name, out_path, sizeof(out_path));
 
-    printf("\n\u2705 Transpilation successful!\n");
-    printf("\ud83d\udcdd Output: %s\n\n", output_file);
-
-    /* Print next steps: run_command has %s placeholders filled with base_name */
-    printf("Next steps:\n  ");
-    printf(info->run_command, base_name, base_name, base_name, base_name);
-    printf("\n\n");
-
-    /* Cleanup */
-    free(source);
-    lexer_free_tokens(tokens, token_count);
-    parser_free_ast(ast);
+    /* 7. Write */
+    if (!write_file(out_path, output_code)) {
+        free(output_code);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+        return 1;
+    }
     free(output_code);
 
+    printf("subc: transpiled '%s'  ->  %s\n", input_file, out_path);
+
+    parser_free_ast(ast);
+    lexer_free_tokens(tokens, ntok);
+    free(source);
     return 0;
 }
