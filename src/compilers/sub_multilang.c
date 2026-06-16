@@ -1,6 +1,6 @@
 /* ========================================
    SUB Language Multi-Language Compiler Driver
-   Compile SUB code to: Python, Java, Swift, Kotlin, C, C++, Rust, JS, Assembly, CSS
+   Transpile SUB code to: Python, Java, Swift, Kotlin, C, C++, Rust, JS, Assembly, CSS, Go, Ruby
    File: sub_multilang.c
    ======================================== */
 
@@ -10,8 +10,8 @@
 #include "windows_compat.h"
 #include "targets.h"
 
-/* Depth guard for recursive codegen functions */
-static int _gen_depth = 0;
+/* Depth guard shared with codegen_multilang.c */
+int _gen_depth = 0;
 
 /* External codegen functions (from codegen_multilang.c) */
 extern char* codegen_python(ASTNode *ast, const char *source);
@@ -29,7 +29,7 @@ extern char* codegen_assembly(ASTNode *ast, const char *source);
 /* From codegen.c */
 extern char* codegen_generate_c(ASTNode *ast, Platform platform);
 
-/* Helper: strip directory and .sb/.sub extension */
+/* Helper: strip directory and .sb/.sub extension to get basename */
 static void get_output_basename(const char *input_file, char *out, size_t n) {
     const char *base = input_file;
     for (const char *p = input_file; *p; p++)
@@ -48,20 +48,12 @@ char* read_file(const char *filename) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
         return NULL;
     }
-    
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
     char *content = malloc(size + 1);
-    if (!content) {
-        fclose(file);
-        return NULL;
-    }
-    
-    if (fread(content, 1, size, file) != (size_t)size) {
-        /* short read — tolerate text mode diffs */
-    }
+    if (!content) { fclose(file); return NULL; }
+    if (fread(content, 1, size, file) != (size_t)size) { /* tolerate text-mode diff */ }
     content[size] = '\0';
     fclose(file);
     return content;
@@ -70,10 +62,7 @@ char* read_file(const char *filename) {
 /* Utility: Write file */
 void write_file(const char *filename, const char *content) {
     FILE *file = fopen(filename, "w");
-    if (!file) {
-        fprintf(stderr, "Error: Cannot write to file %s\n", filename);
-        return;
-    }
+    if (!file) { fprintf(stderr, "Error: Cannot write to file %s\n", filename); return; }
     fprintf(file, "%s", content);
     fclose(file);
 }
@@ -81,49 +70,46 @@ void write_file(const char *filename, const char *content) {
 /* Generate code for target language */
 char* generate_code(ASTNode *ast, TargetLanguage lang, const char *source) {
     _gen_depth = 0; /* reset depth guard before each top-level codegen call */
+
     if (lang == LANG_C) {
         return codegen_generate_c(ast, PLATFORM_LINUX);
     }
-    
+
     if (!target_is_implemented(lang)) {
-        const char *lang_name = language_to_string(lang);
-        fprintf(stderr, "%s codegen not yet implemented\n", lang_name);
+        fprintf(stderr, "%s codegen not yet implemented\n", language_to_string(lang));
         return NULL;
     }
-    
+
     CodegenFn codegen = get_codegen_for_target(language_to_string(lang));
-    if (!codegen) {
-        fprintf(stderr, "Unknown target language\n");
-        return NULL;
-    }
-    
+    if (!codegen) { fprintf(stderr, "Unknown target language\n"); return NULL; }
+
     return codegen(ast, source);
 }
 
 /* Print usage */
 void print_usage(const char *prog_name) {
     printf(SUB_LOGO);
-    printf("Usage: %s <input.sb> [target_language]\n\n", prog_name);
+    printf("Usage: %s <input.sb> [target_language] [output_name]\n\n", prog_name);
     printf("Supported Target Languages:\n");
-    printf("  c, cpp/c++     - C and C++\n");
-    printf("  cpp17, cpp20   - C++17, C++20\n");
-    printf("  python/py      - Python 3\n");
-    printf("  java           - Java\n");
-    printf("  swift          - Swift\n");
-    printf("  kotlin/kt      - Kotlin\n");
-    printf("  rust/rs        - Rust\n");
-    printf("  javascript/js  - JavaScript\n");
-    printf("  typescript/ts  - TypeScript\n");
-    printf("  go/golang      - Go\n");
-    printf("  assembly/asm   - x86-64 Assembly\n");
-    printf("  css            - CSS Stylesheet\n");
-    printf("  ruby/rb        - Ruby\n");
+    printf("  c, cpp/c++       - C and C++\n");
+    printf("  cpp17, cpp20     - C++17, C++20\n");
+    printf("  python/py        - Python 3\n");
+    printf("  java             - Java\n");
+    printf("  swift            - Swift\n");
+    printf("  kotlin/kt        - Kotlin\n");
+    printf("  rust/rs          - Rust\n");
+    printf("  javascript/js    - JavaScript\n");
+    printf("  typescript/ts    - TypeScript\n");
+    printf("  go/golang        - Go\n");
+    printf("  assembly/asm     - x86-64 Assembly\n");
+    printf("  css              - CSS Stylesheet\n");
+    printf("  ruby/rb          - Ruby\n");
     printf("\nExamples:\n");
-    printf("  %s hello.sb python      # Transpile to hello.py\n", prog_name);
-    printf("  %s hello.sb cpp17       # Transpile to hello.cpp\n", prog_name);
-    printf("  %s hello.sb java        # Transpile to SubProgram.java\n", prog_name);
-    printf("  %s hello.sb rust        # Transpile to hello.rs\n", prog_name);
-    printf("  %s hello.sb c           # Transpile to hello.c (default)\n\n", prog_name);
+    printf("  %s hello.sb python      # -> hello.py\n", prog_name);
+    printf("  %s hello.sb python myapp # -> myapp.py\n", prog_name);
+    printf("  %s hello.sb cpp17       # -> hello.cpp\n", prog_name);
+    printf("  %s hello.sb rust        # -> hello.rs\n", prog_name);
+    printf("  %s hello.sb c           # -> hello.c\n\n", prog_name);
 }
 
 /* Main function */
@@ -134,82 +120,98 @@ int main(int argc, char *argv[]) {
         print_usage(argv[0]);
         return 1;
     }
-    
+
     const char *input_file = argv[1];
     const char *target_lang_str = argc > 2 ? argv[2] : "c";
     TargetLanguage target_lang = parse_language(target_lang_str);
     LanguageInfo *info = language_info_get(target_lang);
-    
-    /* Derive output basename from input filename */
-    char base_name[256];
-    get_output_basename(input_file, base_name, sizeof(base_name));
 
-    /* Determine output filename */
-    char output_file[256];
+    /* Derive output basename:
+       If argv[3] is given, use it as the output name (without extension).
+       Otherwise derive from the input filename: first.sb -> first */
+    char base_name[256];
+    if (argc > 3) {
+        /* User supplied explicit output name, strip any extension they may have added */
+        strncpy(base_name, argv[3], sizeof(base_name) - 1);
+        base_name[sizeof(base_name) - 1] = '\0';
+        char *dot = strrchr(base_name, '.');
+        if (dot) *dot = '\0';  /* strip extension if given */
+    } else {
+        get_output_basename(input_file, base_name, sizeof(base_name));
+    }
+
+    /* Build output filename */
+    char output_file[512];
     if (target_lang == LANG_JAVA) {
         snprintf(output_file, sizeof(output_file), "SubProgram%s", info->extension);
     } else {
         snprintf(output_file, sizeof(output_file), "%s%s", base_name, info->extension);
     }
 
-    printf("\u256c\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\n");
-    printf("\u2551  SUB Language Compiler v2.0            \u2551\n");
-    printf("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n");
-    
+    printf("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n");
+    printf("\u2551  SUB Transpiler v2.0                      \u2551\n");
+    printf("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n");
+
     printf("\ud83d\udcc4 Input:  %s\n", input_file);
     printf("\ud83c\udfaf Target: %s\n", info->name);
     printf("\ud83d\udce6 Output: %s\n\n", output_file);
-    
-    // Phase 1: Read source
+
+    /* Phase 1: Read source */
     printf("[1/5] \ud83d\udcd6 Reading source file...\n");
     char *source = read_file(input_file);
     if (!source) return 1;
     printf("      \u2713 Read %zu bytes\n", strlen(source));
-    
-    // Phase 2: Lexical Analysis
+
+    /* Phase 2: Lexical Analysis */
     printf("[2/5] \ud83d\udd24 Lexical analysis...\n");
     int token_count;
     Token *tokens = lexer_tokenize(source, &token_count);
-    printf("      \u2713 Generated %d tokens\n", token_count);
-    
-    // Phase 3: Parsing
+    if (!tokens) { fprintf(stderr, "      \u2717 Lexer failed\n"); free(source); return 1; }
+    printf("      \u2713 %d tokens\n", token_count);
+
+    /* Phase 3: Parsing */
     printf("[3/5] \ud83c\udf33 Parsing...\n");
     ASTNode *ast = parser_parse(tokens, token_count);
+    if (!ast) {
+        fprintf(stderr, "      \u2717 Parse failed\n");
+        free(source); lexer_free_tokens(tokens, token_count); return 1;
+    }
     printf("      \u2713 AST created\n");
-    
-    // Phase 4: Semantic Analysis
+
+    /* Phase 4: Semantic Analysis */
     printf("[4/5] \ud83d\udd0d Semantic analysis...\n");
     if (!semantic_analyze(ast)) {
         fprintf(stderr, "      \u2717 Semantic analysis failed\n");
+        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
         return 1;
     }
     printf("      \u2713 Passed\n");
-    
-    // Phase 5: Code Generation
+
+    /* Phase 5: Code Generation */
     printf("[5/5] \u2699\ufe0f  Code generation (%s)...\n", info->name);
     char *output_code = generate_code(ast, target_lang, source);
-    
     if (!output_code) {
         fprintf(stderr, "      \u2717 Code generation failed\n");
+        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast);
         return 1;
     }
-    
+
     write_file(output_file, output_code);
     printf("      \u2713 Generated %zu bytes\n", strlen(output_code));
-    
-    // Success!
-    printf("\n\u2705 Compilation successful!\n");
+
+    printf("\n\u2705 Transpilation successful!\n");
     printf("\ud83d\udcdd Output: %s\n\n", output_file);
-    
-    // Print next steps
-    printf("Next steps:\n");
-    printf("  %s\n\n", info->run_command);
-    
-    // Cleanup
+
+    /* Print next steps: run_command has %s placeholders filled with base_name */
+    printf("Next steps:\n  ");
+    printf(info->run_command, base_name, base_name, base_name, base_name);
+    printf("\n\n");
+
+    /* Cleanup */
     free(source);
     lexer_free_tokens(tokens, token_count);
     parser_free_ast(ast);
     free(output_code);
-    
+
     return 0;
 }
