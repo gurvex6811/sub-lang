@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "logo.h"
 #include "windows_compat.h"
 
 #ifndef _WIN32
@@ -23,6 +24,18 @@ extern char* codegen_go(ASTNode *ast, const char *source);
 extern char* codegen_ruby(ASTNode *ast, const char *source);
 extern char* codegen_assembly(ASTNode *ast, const char *source);
 extern char* codegen_css(ASTNode *ast, const char *source);
+
+/* Helper: strip directory and .sb/.sub extension from input filename */
+static void get_output_basename(const char *input_file, char *out, size_t n) {
+    const char *base = input_file;
+    for (const char *p = input_file; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    strncpy(out, base, n - 1);
+    out[n - 1] = '\0';
+    char *dot = strrchr(out, '.');
+    if (dot && (strcmp(dot, ".sb") == 0 || strcmp(dot, ".sub") == 0))
+        *dot = '\0';
+}
 
 // Utility: Read file contents
 char* read_file(const char *filename) {
@@ -98,7 +111,7 @@ typedef struct {
 static const TargetDescriptor* lookup_target(const char *name) {
     static const TargetDescriptor targets[] = {
         /* ---- Platform targets ---- */
-        {"android",    TARGET_KIND_PLATFORM, PLATFORM_ANDROID, ".java",  "javac output.java"},
+        {"android",    TARGET_KIND_PLATFORM, PLATFORM_ANDROID, ".java",  "javac SubProgram.java"},
         {"ios",        TARGET_KIND_PLATFORM, PLATFORM_IOS,     ".swift", "swiftc output.swift -o program && ./program"},
         {"web",        TARGET_KIND_PLATFORM, PLATFORM_WEB,     ".html",  "Open output.html in a web browser"},
         {"windows",    TARGET_KIND_PLATFORM, PLATFORM_WINDOWS, ".c",     "gcc output.c -o program && program.exe"},
@@ -175,8 +188,7 @@ static char* generate_language_code(const char *name, ASTNode *ast, const char *
 
 // Print help / usage
 static void print_help(const char *prog) {
-    printf("SUB Language Compiler v2.0\n");
-    printf("================================\n\n");
+    printf(SUB_LOGO);
     printf("Usage: %s <input.sb> [target] [--help]\n\n", prog);
     printf("Targets can be a PLATFORM or a LANGUAGE:\n\n");
     printf("  Platform targets (generates platform-specific code):\n");
@@ -201,18 +213,17 @@ static void print_help(const char *prog) {
     printf("    assembly / asm   x86-64 Assembly\n");
     printf("    css              CSS Stylesheet\n\n");
     printf("Examples:\n");
-    printf("  %s program.sb              # Compile for Linux (output.c)\n", prog);
-    printf("  %s program.sb android      # Compile for Android (output.java)\n", prog);
-    printf("  %s program.sb python       # Transpile to Python (output.py)\n", prog);
-    printf("  %s program.sb rust         # Transpile to Rust (output.rs)\n", prog);
-    printf("  %s program.sb js           # Transpile to JavaScript (output.js)\n", prog);
-    printf("  %s program.sb --help       # Show this help message\n\n", prog);
+    printf("  %s hello.sb              # Compile for Linux (hello.c)\n", prog);
+    printf("  %s hello.sb android      # Compile for Android (SubProgram.java)\n", prog);
+    printf("  %s hello.sb python       # Transpile to Python (hello.py)\n", prog);
+    printf("  %s hello.sb rust         # Transpile to Rust (hello.rs)\n", prog);
+    printf("  %s hello.sb js           # Transpile to JavaScript (hello.js)\n", prog);
+    printf("  %s hello.sb --help       # Show this help message\n\n", prog);
 }
 
 // Main function
 int main(int argc, char *argv[]) {
-    printf("SUB Language Compiler v2.0\n");
-    printf("================================\n\n");
+    printf(SUB_LOGO);
 
     // Check for --help anywhere in argv
     for (int i = 1; i < argc; i++) {
@@ -288,13 +299,20 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Build output filename: output.<ext>
+    // Build output filename from input basename
     char output_file[256];
-    snprintf(output_file, sizeof(output_file), "output%s", target->extension);
+    char base_name[256];
+    get_output_basename(input_file, base_name, sizeof(base_name));
+    if (target->kind == TARGET_KIND_LANGUAGE &&
+        strcasecmp(target_str, "java") == 0) {
+        snprintf(output_file, sizeof(output_file), "SubProgram%s", target->extension);
+    } else {
+        snprintf(output_file, sizeof(output_file), "%s%s", base_name, target->extension);
+    }
     write_file(output_file, output_code);
     
-    printf("\n✓ Compilation successful!\n");
-    printf("✓ Output written to: %s\n", output_file);
+    printf("\n\u2713 Compilation successful!\n");
+    printf("\u2713 Output written to: %s\n", output_file);
     
     // Print next steps
     printf("\nNext steps:\n");

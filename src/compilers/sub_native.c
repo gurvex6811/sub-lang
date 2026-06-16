@@ -1,132 +1,136 @@
 /* ========================================
    SUB Language - Native Compiler Driver
-   Compile SUB directly to native machine code
+   Compiles SUB to native binary via C backend + gcc
    File: sub_native.c
    ======================================== */
 
+#define _GNU_SOURCE
 #include "sub_compiler.h"
-#include "ir.h"
-#include "codegen_native.h"
+#include "logo.h"
 #include "windows_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #ifdef _WIN32
 #include <process.h>
 #else
 #include <unistd.h>
 #endif
 
-/* Read file */
-static char* read_file_native(const char *filename) {
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Cannot open file %s\n", filename);
-        return NULL;
-    }
-    
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fprintf(stderr, "Error: Failed to seek file %s\n", filename);
-        fclose(file);
-        return NULL;
-    }
-    long size = ftell(file);
-    if (size < 0) {
-        fprintf(stderr, "Error: Failed to read file size for %s\n", filename);
-        fclose(file);
-        return NULL;
-    }
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        fprintf(stderr, "Error: Failed to rewind file %s\n", filename);
-        fclose(file);
-        return NULL;
-    }
-    
-    char *content = malloc(size + 1);
-    if (!content) {
-        fprintf(stderr, "Error: Out of memory reading %s\n", filename);
-        fclose(file);
-        return NULL;
-    }
-    
-    size_t read_size = fread(content, 1, (size_t)size, file);
-    if (read_size != (size_t)size) {
-        fprintf(stderr, "Error: Failed to read file %s\n", filename);
-        free(content);
-        fclose(file);
-        return NULL;
-    }
-    content[size] = '\0';
-    fclose(file);
-    return content;
-}
-
-/* Write file */
-static void write_file_native(const char *filename, const char *content) {
-    FILE *file = fopen(filename, "w");
-    if (!file) {
-        fprintf(stderr, "Error: Cannot write to file %s\n", filename);
+/* Helper: derive output name from input filename, or use user_out if provided */
+static void derive_output_name(const char *input, const char *user_out,
+                               char *out, size_t n) {
+    if (user_out && *user_out) {
+        strncpy(out, user_out, n - 1);
+        out[n - 1] = '\0';
         return;
     }
-    fprintf(file, "%s", content);
-    fclose(file);
+    const char *base = input;
+    for (const char *p = input; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    strncpy(out, base, n - 1);
+    out[n - 1] = '\0';
+    char *dot = strrchr(out, '.');
+    if (dot) *dot = '\0';
 }
 
 /* Print usage */
 void print_usage_native(const char *prog_name) {
-    printf("\n");
-    printf("╭────────────────────────────────────────────────────╮\n");
-    printf("│    SUB Native Compiler v1.0 - Real Machine Code  │\n");
-    printf("╰────────────────────────────────────────────────────╯\n\n");
+    printf(SUB_LOGO);
     printf("Usage: %s <input.sb> [options]\n\n", prog_name);
     printf("Output Options:\n");
-    printf("  -o <file>          Output filename (default: a.out)\n");
-    printf("  -S                 Generate assembly only (.s file)\n");
-    printf("  -c                 Generate object file only (.o)\n");
-    printf("  -emit-ir           Show IR (intermediate representation)\n\n");
+    printf("  -o <file>          Output filename (default: derived from input)\n\n");
     printf("Optimization:\n");
     printf("  -O0                No optimization (fast compile)\n");
     printf("  -O1                Basic optimization\n");
     printf("  -O2                Standard optimization (default)\n");
     printf("  -O3                Aggressive optimization\n\n");
-    printf("Platform:\n");
-    printf("  -m32               Generate 32-bit code\n");
-    printf("  -m64               Generate 64-bit code (default)\n");
-    printf("  --target=<arch>    Cross-compile (x86_64, arm64, etc)\n\n");
     printf("Debug:\n");
-    printf("  -g                 Include debug information\n");
     printf("  -v, --verbose      Verbose output\n\n");
     printf("Examples:\n");
-    printf("  %s program.sb                  # Compile to native binary\n", prog_name);
-    printf("  %s program.sb -O3              # Max optimization\n", prog_name);
-    printf("  %s program.sb -S               # Generate assembly\n", prog_name);
-    printf("  %s program.sb -emit-ir         # Show IR\n", prog_name);
-    printf("  %s program.sb -o myapp         # Custom output name\n\n", prog_name);
+    printf("  %s hello.sb                  # Compile to ./hello\n", prog_name);
+    printf("  %s hello.sb -O3              # Max optimization\n", prog_name);
+    printf("  %s hello.sb -o myapp         # Custom output name\n\n", prog_name);
+}
+
+int compile_to_native(const char *input_file, const char *output_name,
+                      bool verbose, int opt_level) {
+    /* ---- Phase 1: Read source ---- */
+    FILE *f = fopen(input_file, "rb");
+    if (!f) { fprintf(stderr, "Cannot open: %s\n", input_file); return 1; }
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *source = malloc(sz + 1);
+    if (!source) { fclose(f); return 1; }
+    fread(source, 1, sz, f); source[sz] = '\0'; fclose(f);
+
+    /* ---- Phase 2: Lex ---- */
+    if (verbose) printf("[1/4] Lexing...\n");
+    int ntok;
+    Token *tokens = lexer_tokenize(source, &ntok);
+
+    /* ---- Phase 3: Parse ---- */
+    if (verbose) printf("[2/4] Parsing...\n");
+    ASTNode *ast = parser_parse(tokens, ntok);
+
+    /* ---- Phase 4: Semantic ---- */
+    if (verbose) printf("[3/4] Semantic analysis...\n");
+    if (!semantic_analyze(ast)) {
+        fprintf(stderr, "Semantic analysis failed.\n");
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+        return 1;
+    }
+
+    /* ---- Phase 5: Generate C, write temp file ---- */
+    if (verbose) printf("[4/4] Generating binary via gcc...\n");
+    char *c_code = codegen_generate(ast, PLATFORM_LINUX);
+    parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+    if (!c_code) { fprintf(stderr, "Code generation failed.\n"); return 1; }
+
+    char tmp_c[512];
+#ifdef _WIN32
+    snprintf(tmp_c, sizeof(tmp_c), "sub_tmp_%d.c", (int)GetCurrentProcessId());
+#else
+    snprintf(tmp_c, sizeof(tmp_c), "/tmp/sub_tmp_%d.c", (int)getpid());
+#endif
+    FILE *cf = fopen(tmp_c, "w");
+    if (!cf) { free(c_code); fprintf(stderr, "Cannot write temp file.\n"); return 1; }
+    fputs(c_code, cf); fclose(cf); free(c_code);
+
+    /* ---- Phase 6: Compile with gcc ---- */
+    const char *opt = opt_level >= 2 ? "-O2" : opt_level == 1 ? "-O1" : "-O0";
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "gcc %s -o \"%s\" \"%s\"", opt, output_name, tmp_c);
+    int ret = system(cmd);
+    remove(tmp_c);
+
+    if (ret != 0) {
+        fprintf(stderr, "Compilation failed. Make sure gcc is installed.\n");
+        return 1;
+    }
+    printf("\u2705 Compiled: %s\n", output_name);
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
+    printf(SUB_LOGO);
+
     if (argc < 2) {
         print_usage_native(argv[0]);
         return 1;
     }
     
     const char *input_file = argv[1];
-    const char *output_file = "a.out";
-    bool emit_asm = false;
-    bool emit_ir = false;
+    const char *user_out = NULL;
     bool verbose = false;
     int opt_level = 2;
     
     // Parse command line options
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "-S") == 0) {
-            emit_asm = true;
-        } else if (strcmp(argv[i], "-emit-ir") == 0) {
-            emit_ir = true;
-        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
             verbose = true;
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-            output_file = argv[++i];
+            user_out = argv[++i];
         } else if (strcmp(argv[i], "-O0") == 0) {
             opt_level = 0;
         } else if (strcmp(argv[i], "-O1") == 0) {
@@ -137,170 +141,15 @@ int main(int argc, char *argv[]) {
             opt_level = 3;
         }
     }
-    
-    printf("\n╭──────────────────────────────────────────────────╮\n");
-    printf("│      SUB Native Compiler - Compiling to Machine Code      │\n");
-    printf("╰──────────────────────────────────────────────────╯\n\n");
-    
+
+    char output_name[512];
+    derive_output_name(input_file, user_out, output_name, sizeof(output_name));
+
     if (verbose) {
-        printf("📄 Input:  %s\n", input_file);
-        printf("⚙️  Mode:   Native Compilation (-O%d)\n", opt_level);
-        printf("📦 Output: %s\n\n", output_file);
+        printf("\ud83d\udcc4 Input:  %s\n", input_file);
+        printf("\u2699\ufe0f  Mode:   Native via gcc (-O%d)\n", opt_level);
+        printf("\ud83d\udce6 Output: %s\n\n", output_name);
     }
     
-    // Phase 1: Read source
-    if (verbose) printf("[1/6] 📖 Reading source file...\n");
-    char *source = read_file_native(input_file);
-    if (!source) return 1;
-    if (verbose) printf("      ✓ Read %zu bytes\n", strlen(source));
-    
-    // Phase 2: Lexical Analysis
-    if (verbose) printf("[2/6] 🔤 Lexical analysis...\n");
-    int token_count;
-    Token *tokens = lexer_tokenize(source, &token_count);
-    if (verbose) printf("      ✓ Generated %d tokens\n", token_count);
-    
-    // Phase 3: Parsing
-    if (verbose) printf("[3/6] 🌳 Parsing...\n");
-    ASTNode *ast = parser_parse(tokens, token_count);
-    if (verbose) printf("      ✓ AST created\n");
-    
-    // Phase 4: Semantic Analysis
-    if (verbose) printf("[4/6] 🔍 Semantic analysis...\n");
-    if (!semantic_analyze(ast)) {
-        fprintf(stderr, "      ✗ Semantic analysis failed\n");
-        return 1;
-    }
-    if (verbose) printf("      ✓ Passed\n");
-    
-    // Phase 5: IR Generation
-    if (verbose) printf("[5/6] 🧠 Generating IR...\n");
-    IRModule *ir = ir_generate_from_ast(ast);
-    if (!ir) {
-        fprintf(stderr, "      ✗ IR generation failed\n");
-        return 1;
-    }
-    if (verbose) printf("      ✓ IR generated\n");
-    
-    // Emit IR if requested
-    if (emit_ir) {
-        printf("\n=== IR Output ===\n");
-        ir_print(ir);
-        printf("=== End IR ===\n\n");
-    }
-    
-    // Optimize IR
-    if (opt_level > 0 && verbose) {
-        printf("      💡 Optimizing (level %d)...\n", opt_level);
-    }
-    if (opt_level > 0) {
-        ir_optimize(ir);
-    }
-    
-    // Phase 6: Native Code Generation
-    if (verbose) printf("[6/6] ⚡ Generating native code...\n");
-    
-    NativeCodegenOptions options = {
-        .target = codegen_native_get_host_target(),
-        .format = codegen_native_get_host_format(),
-        .optimize_level = opt_level,
-        .debug_info = false,
-        .position_independent = false
-    };
-    
-    char *asm_code = codegen_native_generate_asm(ir, options.target);
-    if (!asm_code) {
-        fprintf(stderr, "      ✗ Code generation failed\n");
-        return 1;
-    }
-    
-    if (verbose) printf("      ✓ Generated %zu bytes\n", strlen(asm_code));
-    
-    // Write assembly file
-    char asm_file[256];
-    if (emit_asm) {
-        snprintf(asm_file, sizeof(asm_file), "%s", output_file);
-    } else {
-#ifdef _WIN32
-        snprintf(asm_file, sizeof(asm_file), "sub_temp_%d.s", getpid());
-#else
-        snprintf(asm_file, sizeof(asm_file), "/tmp/sub_temp_%d.s", getpid());
-#endif
-    }
-    
-    write_file_native(asm_file, asm_code);
-    
-    if (emit_asm) {
-        printf("\n✅ Assembly generation successful!\n");
-        printf("📝 Output: %s\n\n", asm_file);
-        printf("Assemble and link with:\n");
-#ifdef __APPLE__
-        if (options.target == NATIVE_TARGET_ARM64) {
-            printf("  as -arch arm64 %s -o temp.o\n", asm_file);
-        } else {
-            printf("  as -arch x86_64 %s -o temp.o\n", asm_file);
-        }
-        printf("  ld temp.o -o %s -lSystem\n\n", output_file);
-#elif defined(_WIN32)
-        printf("  ml64 /c %s\n", asm_file);
-        printf("  link /SUBSYSTEM:CONSOLE temp.obj /OUT:%s\n\n", output_file);
-#else
-        printf("  as %s -o temp.o\n", asm_file);
-        if (options.target == NATIVE_TARGET_ARM64) {
-            printf("  ld temp.o -o %s -lc -dynamic-linker /lib/ld-linux-aarch64.so.1\n\n", output_file);
-        } else {
-            printf("  ld temp.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2\n\n", output_file);
-        }
-#endif
-    } else {
-        // Assemble and link
-        if (verbose) printf("\n🔧 Assembling and linking...\n");
-        
-        char cmd[512];
-#ifdef __APPLE__
-        if (options.target == NATIVE_TARGET_ARM64) {
-            snprintf(cmd, sizeof(cmd), "as -arch arm64 %s -o /tmp/sub_temp_%d.o && ld /tmp/sub_temp_%d.o -o %s -lSystem 2>/dev/null",
-                     asm_file, getpid(), getpid(), output_file);
-        } else {
-            snprintf(cmd, sizeof(cmd), "as -arch x86_64 %s -o /tmp/sub_temp_%d.o && ld /tmp/sub_temp_%d.o -o %s -lSystem 2>/dev/null",
-                     asm_file, getpid(), getpid(), output_file);
-        }
-#elif defined(_WIN32)
-        snprintf(cmd, sizeof(cmd), "gcc -o %s %s 2>nul", output_file, asm_file);
-#else
-        if (options.target == NATIVE_TARGET_ARM64) {
-            snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib/ld-linux-aarch64.so.1 2>/dev/null",
-                     asm_file, getpid(), getpid(), output_file);
-        } else {
-            snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2 2>/dev/null",
-                     asm_file, getpid(), getpid(), output_file);
-        }
-#endif
-        
-        int result = system(cmd);
-        if (result != 0) {
-            fprintf(stderr, "✗ Assembly/linking failed\n");
-            fprintf(stderr, "Assembly saved to: %s\n", asm_file);
-            return 1;
-        }
-        
-        // Clean up temp files
-        if (!emit_asm) {
-            remove(asm_file);
-        }
-        
-        printf("\n✅ Native compilation successful!\n");
-        printf("🚀 Executable: %s\n\n", output_file);
-        printf("Run with:\n");
-        printf("  ./%s\n\n", output_file);
-    }
-    
-    // Cleanup
-    free(source);
-    lexer_free_tokens(tokens, token_count);
-    parser_free_ast(ast);
-    ir_module_free(ir);
-    free(asm_code);
-    
-    return 0;
+    return compile_to_native(input_file, output_name, verbose, opt_level);
 }

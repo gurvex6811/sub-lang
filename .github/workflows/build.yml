@@ -19,14 +19,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build compiler + transpiler
+      - name: Build compiler + transpiler + interpreter
         run: make all
       - name: Smoke test compiler + transpiler
         run: |
           ./sub tests/test_simple.sb linux
-          ./subc tests/test_simple.sb -S -o native_output.s
-          test -f output_linux.c
-          test -f native_output.s
+          test -f test_simple.c
+      - name: Build interpreter
+        run: make interpreter
+      - name: Smoke test interpreter
+        run: |
+          echo 'var x = 10' > /tmp/test_interp.sb
+          echo 'print(x)' >> /tmp/test_interp.sb
+          ./subi /tmp/test_interp.sb
 
   build-windows:
     name: build (windows / ${{ matrix.arch }})
@@ -48,13 +53,17 @@ jobs:
             mingw-w64-x86_64-gcc
             make
           msystem: MINGW64
-      - name: Build compiler + transpiler
+      - name: Build all tools
         shell: msys2 {0}
         run: make all
       - name: Smoke test compiler + transpiler
         shell: msys2 {0}
         run: |
           ./sub.exe tests/test_simple.sb linux
-          ./subc.exe tests/test_simple.sb -S -o native_output.s
-          test -f output_linux.c
-          test -f native_output.s
+          test -f test_simple.c
+      - name: Smoke test interpreter
+        shell: msys2 {0}
+        run: |
+          echo 'var x = 10' > test_interp.sb
+          echo 'print(x)' >> test_interp.sb
+          ./subi.exe test_interp.sb

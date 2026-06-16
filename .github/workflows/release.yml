@@ -22,16 +22,19 @@ jobs:
             arch: x86_64
             compiler_name: sub
             native_name: subc
+            interp_name: subi
             asset_name: sub-linux-x86_64
           - os: macos-26
             arch: arm64
             compiler_name: sub
             native_name: subc
+            interp_name: subi
             asset_name: sub-macos-arm64
           - os: windows-latest
             arch: x86_64
             compiler_name: sub.exe
             native_name: subc.exe
+            interp_name: subi.exe
             asset_name: sub-windows-x86_64
 
     steps:
@@ -58,15 +61,16 @@ jobs:
             make
           msystem: MINGW64
 
-      - name: Build compiler + native compiler (Linux/macOS)
+      - name: Build all tools (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           make clean
           make all
           cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}
           cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native
+          cp ${{ matrix.interp_name }} ${{ matrix.asset_name }}-interp
 
-      - name: Build compiler + native compiler (Windows)
+      - name: Build all tools (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
@@ -74,6 +78,7 @@ jobs:
           make all
           cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}.exe
           cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native.exe
+          cp ${{ matrix.interp_name }} ${{ matrix.asset_name }}-interp.exe
 
       - name: Upload compiler artifact
         uses: actions/upload-artifact@v4
@@ -87,6 +92,13 @@ jobs:
         with:
           name: ${{ matrix.asset_name }}-native
           path: ${{ matrix.asset_name }}-native${{ runner.os == 'Windows' && '.exe' || '' }}
+          retention-days: 5
+
+      - name: Upload interpreter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-interp
+          path: ${{ matrix.asset_name }}-interp${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 5
 
   create-release:
@@ -149,15 +161,18 @@ jobs:
           files: |
             artifacts/sub-linux-x86_64-compiler/*
             artifacts/sub-linux-x86_64-native/*
+            artifacts/sub-linux-x86_64-interp/*
             artifacts/sub-macos-arm64-compiler/*
             artifacts/sub-macos-arm64-native/*
+            artifacts/sub-macos-arm64-interp/*
             artifacts/sub-windows-x86_64-compiler/*
             artifacts/sub-windows-x86_64-native/*
+            artifacts/sub-windows-x86_64-interp/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
-          echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts uploaded for Linux (x86_64), macOS (ARM64), Windows (x86_64)"
-          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
+          echo "\u2705 Release ${{ steps.version.outputs.VERSION }} created successfully!"
+          echo "\ud83d\udce6 Artifacts: Linux (x86_64), macOS (ARM64), Windows (x86_64) — sub, subc, subi"
+          echo "\ud83d\udd17 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"

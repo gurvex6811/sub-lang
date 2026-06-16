@@ -9,10 +9,15 @@ COMPILER_SRC = src/compilers/sub.c src/core/lexer.c src/core/parser_enhanced.c s
 COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
-# Source files for the native compiler (subc)
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/ir/ir.c src/codegen/codegen_native.c src/codegen/codegen_x64.c src/core/utils.c
+# Source files for the native compiler (subc) - now uses C backend + gcc
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/targets.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
+
+# Source files for the interpreter (subi)
+INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/targets.c
+INTERP_OBJ = $(INTERP_SRC:.c=.o)
+INTERP_TARGET = subi
 
 # Platform detection
 UNAME_S := $(shell uname -s)
@@ -28,15 +33,17 @@ else
     LDFLAGS += -static
     COMPILER_TARGET = sub.exe
     NATIVE_COMPILER_TARGET = subc.exe
+    INTERP_TARGET = subi.exe
 endif
 
-.PHONY: all clean compiler native_compiler help
+.PHONY: all clean compiler native_compiler interpreter help
 
-# Default target - build both
-all: compiler native_compiler
+# Default target - build all three
+all: compiler native_compiler interpreter
 	@echo "Build complete!"
 	@echo "Compiler/Transpiler: ./$(COMPILER_TARGET)"
-	@echo "Native Compiler: ./$(NATIVE_COMPILER_TARGET)"
+	@echo "Native Compiler:     ./$(NATIVE_COMPILER_TARGET)"
+	@echo "Interpreter:         ./$(INTERP_TARGET)"
 
 # Main compiler/transpiler
 compiler: $(COMPILER_TARGET)
@@ -44,10 +51,16 @@ compiler: $(COMPILER_TARGET)
 $(COMPILER_TARGET): $(COMPILER_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Native compiler
+# Native compiler (now uses C backend + gcc)
 native_compiler: $(NATIVE_COMPILER_TARGET)
 
 $(NATIVE_COMPILER_TARGET): $(NATIVE_COMPILER_OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Interpreter
+interpreter: $(INTERP_TARGET)
+
+$(INTERP_TARGET): $(INTERP_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
@@ -56,8 +69,9 @@ $(NATIVE_COMPILER_TARGET): $(NATIVE_COMPILER_OBJ)
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -f $(COMPILER_OBJ) $(NATIVE_COMPILER_OBJ)
-	@rm -f $(COMPILER_TARGET) $(NATIVE_COMPILER_TARGET)
+	@rm -f $(COMPILER_OBJ) $(NATIVE_COMPILER_OBJ) $(INTERP_OBJ)
+	@rm -f $(COMPILER_TARGET) $(NATIVE_COMPILER_TARGET) $(INTERP_TARGET)
+	@rm -f sub.exe subc.exe subi.exe
 	@rm -f *.o
 	@echo "Clean complete."
 
@@ -66,8 +80,14 @@ help:
 	@echo "SUB Language Build System"
 	@echo "--------------------------"
 	@echo "Targets:"
-	@echo "  all              - Build both the compiler/transpiler and the native compiler (default)"
+	@echo "  all              - Build all three tools (default)"
 	@echo "  compiler         - Build the main compiler/transpiler (sub)"
 	@echo "  native_compiler  - Build the native compiler (subc)"
+	@echo "  interpreter      - Build the interpreter (subi)"
 	@echo "  clean            - Remove build artifacts"
 	@echo "  help             - Show this help message"
+	@echo ""
+	@echo "Usage:"
+	@echo "  ./sub hello.sb python      # transpile to hello.py"
+	@echo "  ./subc hello.sb hello      # compile to native binary"
+	@echo "  ./subi hello.sb            # interpret directly"
