@@ -6,7 +6,6 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
-#include "codegen_multilang.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +13,18 @@
 
 /* Shared recursion-depth counter used by codegen functions */
 int _gen_depth = 0;
+
+/* Forward declarations for multilang codegen functions */
+extern char* codegen_python(ASTNode *ast, const char *source);
+extern char* codegen_javascript(ASTNode *ast, const char *source);
+extern char* codegen_java(ASTNode *ast, const char *source);
+extern char* codegen_swift(ASTNode *ast, const char *source);
+extern char* codegen_kotlin(ASTNode *ast, const char *source);
+extern char* codegen_rust(ASTNode *ast, const char *source);
+extern char* codegen_go(ASTNode *ast, const char *source);
+extern char* codegen_ruby(ASTNode *ast, const char *source);
+extern char* codegen_assembly(ASTNode *ast, const char *source);
+extern char* codegen_css(ASTNode *ast, const char *source);
 
 /* ---- helpers ---- */
 
@@ -115,9 +126,41 @@ int transpile_file(const char *input_file,
         return 1;
     }
 
-    /* 5. Reset depth counter and generate target-language code */
+    /* 5. Generate target-language code */
     _gen_depth = 0;
-    char *output_code = codegen_generate(ast, target_lang);
+    char *output_code = NULL;
+    
+    /* Dispatch to the matching multilang codegen */
+    if (strcasecmp(target_lang, "python") == 0 || strcasecmp(target_lang, "py") == 0) {
+        output_code = codegen_python(ast, source);
+    } else if (strcasecmp(target_lang, "javascript") == 0 || strcasecmp(target_lang, "js") == 0) {
+        output_code = codegen_javascript(ast, source);
+    } else if (strcasecmp(target_lang, "java") == 0) {
+        output_code = codegen_java(ast, source);
+    } else if (strcasecmp(target_lang, "swift") == 0) {
+        output_code = codegen_swift(ast, source);
+    } else if (strcasecmp(target_lang, "kotlin") == 0 || strcasecmp(target_lang, "kt") == 0) {
+        output_code = codegen_kotlin(ast, source);
+    } else if (strcasecmp(target_lang, "rust") == 0 || strcasecmp(target_lang, "rs") == 0) {
+        output_code = codegen_rust(ast, source);
+    } else if (strcasecmp(target_lang, "go") == 0 || strcasecmp(target_lang, "golang") == 0) {
+        output_code = codegen_go(ast, source);
+    } else if (strcasecmp(target_lang, "ruby") == 0 || strcasecmp(target_lang, "rb") == 0) {
+        output_code = codegen_ruby(ast, source);
+    } else if (strcasecmp(target_lang, "assembly") == 0 || strcasecmp(target_lang, "asm") == 0) {
+        output_code = codegen_assembly(ast, source);
+    } else if (strcasecmp(target_lang, "css") == 0) {
+        output_code = codegen_css(ast, source);
+    } else if (strcasecmp(target_lang, "c") == 0) {
+        output_code = codegen_generate(ast, PLATFORM_LINUX);
+    } else if (strcasecmp(target_lang, "cpp") == 0 || strcasecmp(target_lang, "c++") == 0) {
+        output_code = codegen_generate_cpp(ast, PLATFORM_LINUX);
+    } else {
+        fprintf(stderr, "subc: unsupported target language '%s'\n", target_lang);
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+        return 1;
+    }
+    
     if (!output_code) {
         fprintf(stderr, "subc: code generation failed for language '%s'\n", target_lang);
         parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
