@@ -66,6 +66,8 @@ output_*
 test_hello.c
 !.github/scripts/opencode.py
 *.js
+*.css
+*.html
 *.rb
 *.java
 *.cpp
