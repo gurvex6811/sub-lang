@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.7-beta)'
+        description: 'Version to release (e.g., v1.0.8-beta)'
         required: true
         type: string
 
@@ -28,10 +28,7 @@ jobs:
             platform: linux
             arch: arm64
             binary_suffix: ''
-          - os: macos-13
-            platform: macos
-            arch: x86_64
-            binary_suffix: ''
+
           - os: macos-26
             platform: macos
             arch: arm64
@@ -196,7 +193,7 @@ jobs:
             echo "|----------|-------------|---------|";
             echo "| Linux | x86_64 | \`sub-linux-x86_64.tar.gz\` |";
             echo "| Linux | arm64 | \`sub-linux-arm64.tar.gz\` |";
-            echo "| macOS | x86_64 (Intel) | \`sub-macos-x86_64.tar.gz\` |";
+
             echo "| macOS | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
             echo "| Windows | x86_64 | \`sub-windows-x86_64.zip\` |";
             echo "";
@@ -222,6 +219,6 @@ jobs:
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts: Linux (x86_64, arm64), macOS (x86_64, arm64), Windows (x86_64)"
+          echo "📦 Artifacts: Linux (x86_64, arm64), macOS (arm64), Windows (x86_64)"
           echo "🔧 Tools: sub (transpiler), subc (native compiler), subi (interpreter)"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
