@@ -217,7 +217,9 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
-            if (node->value) {
+            if (node->value && strcmp(node->value, "show") == 0) {
+                sb_append(sb, "print(");
+            } else if (node->value) {
                 sb_append(sb, "%s(", node->value);
             } else {
                 generate_expr_python(sb, node->left);
@@ -511,7 +513,9 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
-            if (node->value) {
+            if (node->value && strcmp(node->value, "show") == 0) {
+                sb_append(sb, "console.log(");
+            } else if (node->value) {
                 sb_append(sb, "%s(", node->value);
             } else {
                 generate_expr_js(sb, node->left);

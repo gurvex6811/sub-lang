@@ -57,8 +57,12 @@ This builds three tools:
 
 ```bash
 ./subc hello.sb              # produces ./hello
-./subc hello.sb myapp        # produces ./myapp
+./subc hello.sb -o myapp     # produces ./myapp
 ```
+
+`subc hello.sb <name>` (without `-o`) is interpreted as a transpile target
+(see below), not an output name — `<name>` must match a known target or it
+will error with "Unknown target".
 
 ### Transpile to another language
 

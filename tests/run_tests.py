@@ -1,121 +1,198 @@
 #!/usr/bin/env python3
-import subprocess
+"""
+Assertion-based regression tests for the SUB toolchain.
+
+Runs a small set of canonical .sb programs through all three tools
+(sub, subc, subi) and checks that their *actual program output* matches
+an expected value, not just that the tool exited 0. Each tool mixes its
+own banner/log lines into stdout ahead of the program's own output, so
+program output is checked as a suffix of what the tool printed.
+"""
 import os
+import subprocess
 import sys
 
-# Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+EXAMPLES_DIR = os.path.join(ROOT_DIR, "examples")
 
-import sys
-
-# Try to find compiler in root or current dir
-EXE_EXT = ".exe" if sys.platform == "win32" else ""
-COMPILER = os.path.join(ROOT_DIR, "sub" + EXE_EXT)
-if not os.path.exists(COMPILER):
-    COMPILER = "./sub" + EXE_EXT
-
-NATIVE_COMPILER = os.path.join(ROOT_DIR, "subc" + EXE_EXT)
-if not os.path.exists(NATIVE_COMPILER):
-    NATIVE_COMPILER = "./subc" + EXE_EXT
+EXE = ".exe" if sys.platform == "win32" else ""
+SUB = os.path.join(ROOT_DIR, "sub" + EXE)
+SUBC = os.path.join(ROOT_DIR, "subc" + EXE)
+SUBI = os.path.join(ROOT_DIR, "subi" + EXE)
 
 
-TEST_FILE = os.path.join(ROOT_DIR, "examples/comprehensive_test.sb")
-UNIVERSAL_TEST = os.path.join(ROOT_DIR, "examples/universal_test.sb")
+def fizzbuzz_output():
+    lines = []
+    for i in range(1, 31):
+        if i % 15 == 0:
+            lines.append("FizzBuzz")
+        elif i % 3 == 0:
+            lines.append("Fizz")
+        elif i % 5 == 0:
+            lines.append("Buzz")
+        else:
+            lines.append(str(i))
+    return "\n".join(lines)
 
-LANGUAGES = [
-    ("python", "test_output.py", ["python3", "test_output.py"]),
-    ("javascript", "test_output.js", ["node", "test_output.js"]),
-    ("ruby", "test_output.rb", ["ruby", "test_output.rb"]),
-    ("java", "SubProgram.java", ["javac", "SubProgram.java", "&&", "java", "SubProgram"]),
-    ("cpp", "test_output.cpp", ["g++", "test_output.cpp", "-o", "test_cpp", "&&", "./test_cpp"]),
-    ("rust", "test_output.rs", ["rustc", "test_output.rs", "&&", "./test_output"]),
-    ("swift", "test_output.swift", ["swift", "test_output.swift"]),
-    ("kotlin", "test_output.kt", ["kotlinc", "test_output.kt", "-include-runtime", "-d", "test_output.jar", "&&", "java", "-jar", "test_output.jar"]),
+
+def fibonacci_output():
+    def fib(n):
+        return n if n <= 1 else fib(n - 1) + fib(n - 2)
+    return "\n".join(str(fib(i)) for i in range(10))
+
+
+FIXTURES = [
+    ("hello_native.sb", "Hello, World\nSUB Language - Simple Universal Builder\n30"),
+    ("fizzbuzz.sb", fizzbuzz_output()),
+    ("fibonacci.sb", fibonacci_output()),
 ]
 
-def run_command(cmd, shell=False):
+failures = []
+
+
+def check_suffix(actual, expected, label):
+    if actual.rstrip("\n").endswith(expected.rstrip("\n")):
+        print(f"  OK   {label}")
+        return True
+    print(f"  FAIL {label}")
+    print(f"       expected (suffix): {expected!r}")
+    print(f"       actual:            {actual!r}")
+    failures.append(label)
+    return False
+
+
+def run(cmd, cwd=None):
     try:
-        if shell:
-            result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        else:
-            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return True, result.stdout
-    except subprocess.CalledProcessError as e:
-        return False, e.stderr + "\n" + e.stdout
+        result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True,
+                                 encoding="utf-8", errors="replace", timeout=30)
+        return result.returncode, result.stdout
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return 1, str(e)
+
+
+def tool_available(name):
+    """which() alone isn't reliable on Windows: python3/python often resolve
+    to a Microsoft Store "App Execution Alias" stub that's on PATH but exits
+    non-zero without actually running anything. Confirm the tool actually
+    executes before relying on it."""
+    from shutil import which
+    if which(name) is None:
+        return False
+    try:
+        rc, _ = run([name, "--version"])
+        return rc == 0
+    except OSError:
+        return False
+
+
+def test_interpreter(sb_file, expected):
+    rc, out = run([SUBI, sb_file])
+    label = f"subi: {os.path.basename(sb_file)}"
+    if rc != 0:
+        print(f"  FAIL {label} (exit {rc})\n       {out}")
+        failures.append(label)
+        return
+    check_suffix(out, expected, label)
+
+
+def test_native_compile(sb_file, expected):
+    label = f"subc: {os.path.basename(sb_file)}"
+    if not tool_available("gcc"):
+        print(f"  SKIP {label} (gcc not found)")
+        return
+    out_name = os.path.join(ROOT_DIR, "_regtest_bin")
+    rc, out = run([SUBC, sb_file, "-o", out_name])
+    if rc != 0:
+        print(f"  FAIL {label} (compile exit {rc})\n       {out}")
+        failures.append(label)
+        return
+    bin_path = out_name + EXE
+    if not os.path.exists(bin_path):
+        print(f"  FAIL {label} (binary not produced: {bin_path})")
+        failures.append(label)
+        return
+    rc, run_out = run([bin_path])
+    os.remove(bin_path)
+    c_file = out_name + ".c"
+    if os.path.exists(c_file):
+        os.remove(c_file)
+    if rc != 0:
+        print(f"  FAIL {label} (run exit {rc})\n       {run_out}")
+        failures.append(label)
+        return
+    check_suffix(run_out, expected, label)
+
+
+def test_transpile_and_run(sb_file, expected, lang, ext, runner):
+    label = f"sub {lang}: {os.path.basename(sb_file)}"
+    stem = os.path.splitext(os.path.basename(sb_file))[0]
+    out_file = os.path.join(ROOT_DIR, stem + ext)
+    rc, out = run([SUB, sb_file, lang])
+    if rc != 0 or not os.path.exists(out_file):
+        print(f"  FAIL {label} (transpile failed, exit {rc})\n       {out}")
+        failures.append(label)
+        return
+    if runner is None or not tool_available(runner[0]):
+        print(f"  SKIP {label} (transpiled OK; runtime '{runner[0] if runner else '?'}' not available)")
+        os.remove(out_file)
+        return
+    rc, run_out = run(runner + [out_file])
+    os.remove(out_file)
+    if rc != 0:
+        print(f"  FAIL {label} (run exit {rc})\n       {run_out}")
+        failures.append(label)
+        return
+    check_suffix(run_out, expected, label)
+
 
 def main():
-    if not os.path.exists(COMPILER):
-        print(f"Error: Compiler {COMPILER} not found. Run 'make' first.")
+    if not (os.path.exists(SUB) and os.path.exists(SUBC) and os.path.exists(SUBI)):
+        print("Error: sub/subc/subi not found. Run 'make all' first.")
         sys.exit(1)
 
-    print(f"Running comprehensive tests on {TEST_FILE}...")
-    
-    success_count = 0
-    
-    # 1. Test Transpilers
-    for lang, output_file, run_cmd_list in LANGUAGES:
-        print(f"[{lang.upper()}] Transpiling...", end=" ", flush=True)
-        
-        # Transpile
-        cmd = [COMPILER, TEST_FILE, lang]
-        
-        # Special handling for Java output filename which is hardcoded in generator
-        if lang == "java":
-            # The compiler might write to stdout or specific file, here capturing stdout to file
-            with open(output_file, "w") as f:
-                try:
-                    subprocess.run(cmd, stdout=f, check=True)
-                    print("✅ Transpiled", end=" ")
-                except subprocess.CalledProcessError:
-                    print("❌ Transpilation Failed")
-                    continue
+    for fname, expected in FIXTURES:
+        sb_file = os.path.join(EXAMPLES_DIR, fname)
+        print(f"\n=== {fname} ===")
+        test_interpreter(sb_file, expected)
+        test_native_compile(sb_file, expected)
+        test_transpile_and_run(sb_file, expected, "python", ".py", ["python3"])
+        test_transpile_and_run(sb_file, expected, "js", ".js", ["node"])
+        # C++ needs a compile step first, so it's handled separately below
+        # rather than through test_transpile_and_run's single-runner shape.
+        stem = os.path.splitext(fname)[0]
+        if tool_available("g++"):
+            label = f"sub cpp(compiled): {fname}"
+            rc, out = run([SUB, sb_file, "cpp"])
+            cpp_file = os.path.join(ROOT_DIR, stem + ".cpp")
+            if rc == 0 and os.path.exists(cpp_file):
+                bin_path = os.path.join(ROOT_DIR, stem + "_cpp" + EXE)
+                rc, out = run(["g++", cpp_file, "-o", bin_path])
+                if rc == 0 and os.path.exists(bin_path):
+                    rc, run_out = run([bin_path])
+                    check_suffix(run_out, expected, label)
+                    os.remove(bin_path)
+                else:
+                    print(f"  FAIL {label} (g++ compile failed)\n       {out}")
+                    failures.append(label)
+            else:
+                print(f"  FAIL {label} (transpile failed)\n       {out}")
+                failures.append(label)
+            if os.path.exists(cpp_file):
+                os.remove(cpp_file)
         else:
-            # Standard capture
-            success, output = run_command(cmd)
-            if not success:
-                print(f"❌ Transpilation Failed: {output}")
-                continue
-            
-            with open(output_file, "w") as f:
-                f.write(output)
-            print("✅ Transpiled", end=" ")
+            print(f"  SKIP sub cpp(compiled): {fname} (g++ not found)")
 
-        # Validate file nonempty
-        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-            print("❌ Output file empty/missing")
-            continue
-            
-        print(f"({os.path.getsize(output_file)} bytes)")
-        
-        # Optional: Run the generated code if environment has the tool
-        # For now, we mainly accept transpilation success as the verification step
-        # unless specific tools are known to be present.
-        
-        success_count += 1
-
-    # 2. Test Native Compiler
-    # if os.path.exists(NATIVE_COMPILER):
-    #     print(f"\n[NATIVE] Compiling {UNIVERSAL_TEST}...", end=" ", flush=True)
-    #     cmd = [NATIVE_COMPILER, UNIVERSAL_TEST, "uni_test"]
-    #     success, output = run_command(cmd)
-    #     if success:
-    #         print("✅ Compiled", end=" ")
-    #         if os.path.exists("uni_test") or os.path.exists("./uni_test"):
-    #             print("✓ Binary exists")
-    #             success_count += 1
-    #         else:
-    #             print("❌ Binary missing")
-    #     else:
-    #         print(f"❌ Compilation Failed: {output}")
-
-    total_tasks = len(LANGUAGES) # + (1 if os.path.exists(NATIVE_COMPILER) else 0)
-    print(f"\nSummary: {success_count}/{total_tasks} tasks passed.")
-    
-    if success_count == total_tasks:
-        sys.exit(0)
-    else:
+    print(f"\n{'='*40}")
+    if failures:
+        print(f"{len(failures)} check(s) failed:")
+        for f in failures:
+            print(f"  - {f}")
         sys.exit(1)
+    print("All checks passed.")
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

@@ -32,6 +32,8 @@ jobs:
           echo 'var x = 10' > /tmp/test_interp.sb
           echo 'print(x)' >> /tmp/test_interp.sb
           ./subi /tmp/test_interp.sb
+      - name: Run regression tests
+        run: python3 tests/run_tests.py
 
   build-windows:
     name: build (windows / ${{ matrix.arch }})
@@ -51,6 +53,7 @@ jobs:
           update: true
           install: >-
             mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-python
             make
           msystem: MINGW64
       - name: Build all tools
@@ -67,3 +70,6 @@ jobs:
           echo 'var x = 10' > test_interp.sb
           echo 'print(x)' >> test_interp.sb
           ./subi.exe test_interp.sb
+      - name: Run regression tests
+        shell: msys2 {0}
+        run: python3 tests/run_tests.py

@@ -261,7 +261,7 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, " }");
             break;
         case AST_CALL_EXPR:
-            if (node->value && strcmp(node->value, "print") == 0) {
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
                 sb_append(sb, "println!(\"{}\", ");
                 if (node->child_count > 0) generate_expr_rust(sb, node->children[0]);
                 sb_append(sb, ")");

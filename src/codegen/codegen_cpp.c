@@ -216,7 +216,7 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
-            if (strcmp(fn, "print") == 0) {
+            if (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
                     generate_expr_cpp(sb, node->children[0]);
@@ -450,7 +450,7 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_CALL_EXPR:
             indent_code(sb, indent);
-            if (node->value && strcmp(node->value, "print") == 0) {
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
                     generate_expr_cpp(sb, node->children[0]);

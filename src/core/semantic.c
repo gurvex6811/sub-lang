@@ -443,7 +443,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 const char *fn_name = node->value ? node->value : node->left->value;
                 
                 /* Handle builtin functions */
-                if (fn_name && (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "println") == 0)) {
+                if (fn_name && (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "println") == 0 ||
+                                 strcmp(fn_name, "show") == 0)) {
                     /* print() is a builtin - type-check its arguments */
                     for (int i = 0; i < node->child_count; i++) {
                         check_expression_type(node->children[i], table);
