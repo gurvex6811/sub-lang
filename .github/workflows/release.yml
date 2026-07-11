@@ -57,7 +57,7 @@ jobs:
           echo 'var x = 42' > /tmp/smoke.sb
           echo 'print(x)' >> /tmp/smoke.sb
           ./sub /tmp/smoke.sb python
-          ./subc /tmp/smoke.sb /tmp/smoke_bin
+          ./subc /tmp/smoke.sb -o /tmp/smoke_bin
           /tmp/smoke_bin
           ./subi /tmp/smoke.sb
 
@@ -106,7 +106,7 @@ jobs:
           echo 'var x = 42' > smoke.sb
           echo 'print(x)' >> smoke.sb
           ./sub.exe smoke.sb python
-          ./subc.exe smoke.sb smoke_bin
+          ./subc.exe smoke.sb -o smoke_bin
           ./smoke_bin.exe
           ./subi.exe smoke.sb
 
