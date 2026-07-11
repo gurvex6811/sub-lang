@@ -316,11 +316,26 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\nauto %s(", node->value ? node->value : "func");
+            /* `auto` parameter types require C++20 abbreviated function
+               templates, which callers don't reliably compile with
+               (no -std=c++20 in the documented/CI build commands). Use an
+               explicit template instead, which works under any C++11+
+               default. */
+            if (node->children && node->child_count > 0) {
+                sb_append(sb, "\ntemplate<");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    sb_append(sb, "typename T%d", i);
+                }
+                sb_append(sb, ">\n");
+            } else {
+                sb_append(sb, "\n");
+            }
+            sb_append(sb, "auto %s(", node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "auto %s",
+                    sb_append(sb, "T%d %s", i,
                               node->children[i]->value ? node->children[i]->value : "arg");
                 }
             }
