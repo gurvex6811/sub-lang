@@ -141,7 +141,7 @@ def openrouter_request(api_key, model, prompt):
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/subhobhai943/sub-lang",
+            "HTTP-Referer": "https://github.com/gurvex6811/sub-lang",
             "X-Title": "sub-lang opencode workflow",
         },
     )
