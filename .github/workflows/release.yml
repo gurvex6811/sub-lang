@@ -136,20 +136,31 @@ jobs:
           cp sub subc subi "${PKG}/usr/local/bin/"
           cp LICENSE README.md "${PKG}/usr/share/doc/sub-lang/"
 
-          cat > "${PKG}/DEBIAN/control" <<EOF
-          Package: sub-lang
-          Version: ${{ steps.version.outputs.PKG_VERSION }}
-          Section: devel
-          Priority: optional
-          Architecture: ${{ matrix.deb_arch }}
-          Maintainer: SUB Language Project <noreply@github.com>
-          Description: SUB Programming Language Toolchain
-           A modern programming language with transpiler (sub),
-           native compiler (subc), and interpreter (subi).
-          EOF
+          export PKG PKG_VER="${{ steps.version.outputs.PKG_VERSION }}" DEB_ARCH="${{ matrix.deb_arch }}"
+          python3 - <<'PYEOF'
+import os, textwrap
+pkg     = os.environ["PKG"]
+version = os.environ["PKG_VER"]
+arch    = os.environ["DEB_ARCH"]
+control = textwrap.dedent(f"""\
+    Package: sub-lang
+    Version: {version}
+    Section: devel
+    Priority: optional
+    Architecture: {arch}
+    Maintainer: SUB Language Project <noreply@github.com>
+    Description: SUB Programming Language Toolchain
+     A modern programming language with transpiler (sub),
+     native compiler (subc), and interpreter (subi).
+""")
+with open(f"{pkg}/DEBIAN/control", "w") as f:
+    f.write(control)
+print(control)
+PYEOF
 
           dpkg-deb --build "${PKG}"
           echo "Built: ${PKG}.deb"
+
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
