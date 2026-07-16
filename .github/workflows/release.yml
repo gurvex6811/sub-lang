@@ -80,7 +80,7 @@ jobs:
           retention-days: 5
 
   # ─────────────────────────────────────────────
-  # 2. Build Linux packages (.deb, .rpm, .pkg.tar.zst)
+  # 2. Build Linux packages (.deb)
   # ─────────────────────────────────────────────
   build-linux-packages:
     name: linux packages (${{ matrix.arch }})
@@ -93,11 +93,9 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             deb_arch: amd64
-            rpm_arch: x86_64
           - os: ubuntu-24.04-arm
             arch: arm64
             deb_arch: arm64
-            rpm_arch: aarch64
 
     steps:
       - name: Checkout code
@@ -106,7 +104,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make rpm
+          sudo apt-get install -y gcc make
 
       - name: Build binaries
         run: |
@@ -169,101 +167,6 @@ PYEOF
           path: "*.deb"
           retention-days: 5
 
-      # ── .rpm (Red Hat / Fedora / openSUSE) ───
-      - name: Build .rpm package
-        run: |
-          PKG_VER="${{ steps.version.outputs.PKG_VERSION }}"
-          RPM_ARCH="${{ matrix.rpm_arch }}"
-          RPM_ROOT="${HOME}/rpmbuild"
-
-          # RPM Version field must not contain hyphens.
-          # Split "1.0.8-alpha" → BASE_VER="1.0.8", RELEASE="1.alpha"
-          if [[ "${PKG_VER}" =~ ^([0-9][0-9.]*)(-(.+))?$ ]]; then
-            BASE_VER="${BASH_REMATCH[1]}"
-            PRE="${BASH_REMATCH[3]}"
-            RELEASE="1${PRE:+.${PRE}}"
-          else
-            BASE_VER="${PKG_VER}"
-            RELEASE="1"
-          fi
-
-          # Standard rpmbuild layout:
-          #   BUILD/  → where we stage source files (%{_builddir})
-          #   BUILDROOT/ → rpmbuild manages this; %install populates it
-          STAGE="${RPM_ROOT}/BUILD"
-          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          mkdir -p "${STAGE}/usr/local/bin"
-          mkdir -p "${STAGE}/usr/share/doc/sub-lang"
-
-          cp sub subc subi "${STAGE}/usr/local/bin/"
-          cp LICENSE README.md "${STAGE}/usr/share/doc/sub-lang/"
-
-          # Export vars so the Python script below can read them via os.environ
-          export PKG_VER BASE_VER RELEASE RPM_ARCH RPM_ROOT
-
-          python3 - <<'PYEOF'
-import os, subprocess, datetime
-
-pkg_ver  = os.environ["PKG_VER"]
-base_ver = os.environ["BASE_VER"]
-release  = os.environ["RELEASE"]
-rpm_arch = os.environ["RPM_ARCH"]
-rpm_root = os.environ["RPM_ROOT"]
-today    = datetime.date.today().strftime("%a %b %d %Y")
-
-spec = f"""Name:           sub-lang
-Version:        {base_ver}
-Release:        {release}%{{?dist}}
-Summary:        SUB Programming Language Toolchain
-License:        MIT
-BuildArch:      {rpm_arch}
-
-%description
-A modern programming language with transpiler (sub),
-native compiler (subc), and interpreter (subi).
-
-%install
-install -d %{{buildroot}}/usr/local/bin
-install -d %{{buildroot}}/usr/share/doc/sub-lang
-install -m 0755 %{{_builddir}}/usr/local/bin/sub   %{{buildroot}}/usr/local/bin/sub
-install -m 0755 %{{_builddir}}/usr/local/bin/subc  %{{buildroot}}/usr/local/bin/subc
-install -m 0755 %{{_builddir}}/usr/local/bin/subi  %{{buildroot}}/usr/local/bin/subi
-install -m 0644 %{{_builddir}}/usr/share/doc/sub-lang/LICENSE   %{{buildroot}}/usr/share/doc/sub-lang/LICENSE
-install -m 0644 %{{_builddir}}/usr/share/doc/sub-lang/README.md %{{buildroot}}/usr/share/doc/sub-lang/README.md
-
-%files
-/usr/local/bin/sub
-/usr/local/bin/subc
-/usr/local/bin/subi
-/usr/share/doc/sub-lang/LICENSE
-/usr/share/doc/sub-lang/README.md
-
-%changelog
-* {today} SUB Language Project <noreply@github.com> - {base_ver}-{release}
-- Release {pkg_ver}
-"""
-
-spec_path = f"{rpm_root}/SPECS/sub-lang.spec"
-with open(spec_path, "w") as f:
-    f.write(spec)
-print(f"Written spec to {spec_path}")
-print(spec)
-PYEOF
-
-          rpmbuild -bb \
-            --define "_topdir ${RPM_ROOT}" \
-            "${RPM_ROOT}/SPECS/sub-lang.spec"
-
-          find "${RPM_ROOT}/RPMS" -name "*.rpm" -exec cp {} . \;
-          echo "Built RPMs:"
-          ls *.rpm
-
-      - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpm-${{ matrix.arch }}
-          path: "*.rpm"
-          retention-days: 5
 
   # ─────────────────────────────────────────────
   # 3. Build Windows MSI installer
@@ -379,7 +282,7 @@ PYEOF
       - name: Flatten artifacts
         run: |
           mkdir -p ./release-assets
-          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.msi' \) \
+          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.msi' \) \
             -exec cp {} ./release-assets/ \;
           echo "Release assets:"
           ls -lh ./release-assets/
@@ -430,8 +333,7 @@ PYEOF
             echo "| Linux | .tar.gz | arm64  | \`sub-linux-arm64.tar.gz\` |";
             echo "| Linux | .deb (Debian/Ubuntu) | x86_64 | \`sub-lang_*_amd64.deb\` |";
             echo "| Linux | .deb (Debian/Ubuntu) | arm64  | \`sub-lang_*_arm64.deb\` |";
-            echo "| Linux | .rpm (Red Hat/Fedora) | x86_64 | \`sub-lang-*-x86_64.rpm\` |";
-            echo "| Linux | .rpm (Red Hat/Fedora) | arm64  | \`sub-lang-*-aarch64.rpm\` |";
+
             echo "| macOS | .tar.gz | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
             echo "| Windows | .msi installer | x86_64 | \`sub-lang-*-windows-x86_64.msi\` |";
             echo "";
@@ -459,6 +361,6 @@ PYEOF
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts: Linux (x86_64, arm64) tarballs + .deb + .rpm, macOS (arm64) tarball, Windows MSI"
+          echo "📦 Artifacts: Linux (x86_64, arm64) tarballs + .deb, macOS (arm64) tarball, Windows MSI"
           echo "🔧 Tools: sub (transpiler), subc (native compiler), subi (interpreter)"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"

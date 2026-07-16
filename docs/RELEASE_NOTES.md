@@ -5,9 +5,7 @@
 ### Changes
 - **Windows installer**: Switched from a plain `.zip` archive to a proper `.msi` installer built with WiX Toolset v4.
   The installer registers all three tools system-wide and adds them to the system `PATH` automatically.
-- **Linux packages**: Added native package formats for major Linux distributions:
-  - `.deb` — Debian, Ubuntu, and derivatives (x86_64 / arm64)
-  - `.rpm` — Red Hat, Fedora, CentOS, openSUSE, and derivatives (x86_64 / aarch64)
+- **Linux packages**: Added native `.deb` package format for Debian, Ubuntu, and derivatives (x86_64 / arm64).
 - Generic `.tar.gz` archives are still provided for all platforms as before.
 
 ### Components
