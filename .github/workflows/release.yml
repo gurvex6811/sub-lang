@@ -198,7 +198,7 @@ jobs:
           native compiler (subc), and interpreter (subi).
 
           %install
-          cp -a %{_builddir}/../BUILDROOT/${BUILDROOT_DIR}/. %{buildroot}/
+          cp -a %{_topdir}/BUILDROOT/${BUILDROOT_DIR}/. %{buildroot}/
 
           %files
           /usr/local/bin/sub
@@ -263,6 +263,17 @@ jobs:
           ./subc.exe smoke.sb -o smoke_bin
           ./smoke_bin.exe
           ./subi.exe smoke.sb
+
+      - name: Stage binaries for WiX
+        shell: pwsh
+        run: |
+          # WiX resolves Source paths relative to the .wxs file location.
+          # Copy everything the installer needs into installer\windows\ so
+          # the bare filenames in the wxs Source attributes resolve correctly.
+          $dest = "installer\windows"
+          Copy-Item sub.exe, subc.exe, subi.exe, LICENSE, README.md -Destination $dest -Force
+          Write-Host "Staged files:"
+          Get-ChildItem $dest
 
       - name: Get version
         id: version

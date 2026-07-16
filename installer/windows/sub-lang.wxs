@@ -31,11 +31,11 @@
       <Directory Id="INSTALLDIR" Name="SUB Language">
 
         <Component Id="MainBinaries" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
-          <File Id="sub.exe"  Source="../../sub.exe"  KeyPath="yes" />
-          <File Id="subc.exe" Source="../../subc.exe" />
-          <File Id="subi.exe" Source="../../subi.exe" />
-          <File Id="LICENSE"  Source="../../LICENSE"  />
-          <File Id="README"   Source="../../README.md" />
+          <File Id="sub.exe"  Source="sub.exe"  KeyPath="yes" />
+          <File Id="subc.exe" Source="subc.exe" />
+          <File Id="subi.exe" Source="subi.exe" />
+          <File Id="LICENSE"  Source="LICENSE"  />
+          <File Id="README"   Source="README.md" />
 
           <!-- Add install directory to system PATH -->
           <Environment
