@@ -135,7 +135,6 @@ static const KWEntry kw_table[] = {
     {"embed",       TOKEN_EMBED},
     {"endembed",    TOKEN_ENDEMBED},
     {"cpp",         TOKEN_CPP},
-    {"c",           TOKEN_C},
     {"python",      TOKEN_PYTHON},
     {"javascript",  TOKEN_JAVASCRIPT},
     {"rust",        TOKEN_RUST},

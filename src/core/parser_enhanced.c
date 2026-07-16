@@ -722,7 +722,7 @@ static ASTNode* parse_embed_block(ParserState *state) {
     if (!lang) return NULL;
     ASTNodeType node_type = AST_EMBED_CODE;
     if (lang->type == TOKEN_CPP) node_type = AST_EMBED_CPP;
-    else if (lang->type == TOKEN_C) node_type = AST_EMBED_C;
+    else if (lang->type == TOKEN_IDENTIFIER && lang->value && strcmp(lang->value, "c") == 0) node_type = AST_EMBED_C;
     advance(state);
 
     StringBuffer sb;

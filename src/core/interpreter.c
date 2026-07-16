@@ -92,6 +92,19 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         SubVal res = {VAL_STRING}; res.sv = buf; return res;
     }
 
+    /* string comparison */
+    if (L.type == VAL_STRING || R.type == VAL_STRING) {
+        const char *ls = L.type==VAL_STRING ? (L.sv?L.sv:"") : "";
+        const char *rs = R.type==VAL_STRING ? (R.sv?R.sv:"") : "";
+        int cmp = strcmp(ls, rs);
+        if (strcmp(op,"==")==0) return make_bool(cmp==0);
+        if (strcmp(op,"!=")==0) return make_bool(cmp!=0);
+        if (strcmp(op,"<")==0)  return make_bool(cmp<0);
+        if (strcmp(op,"<=")==0) return make_bool(cmp<=0);
+        if (strcmp(op,">")==0)  return make_bool(cmp>0);
+        if (strcmp(op,">=")==0) return make_bool(cmp>=0);
+    }
+
     double a = L.type==VAL_FLOAT ? L.fv : (double)L.iv;
     double b = R.type==VAL_FLOAT ? R.fv : (double)R.iv;
     int use_float = (L.type==VAL_FLOAT || R.type==VAL_FLOAT);

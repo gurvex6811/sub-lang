@@ -275,17 +275,34 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     /* Build format string */
                     if (node->left->data_type == TYPE_STRING) sb_append(sb, "%%s");
                     else if (node->left->data_type == TYPE_INT) sb_append(sb, "%%ld");
-                    else if (node->left->data_type == TYPE_FLOAT) sb_append(sb, "%%f");
+                    else if (node->left->data_type == TYPE_FLOAT) sb_append(sb, "%%g");
                     else sb_append(sb, "%%s");
                     if (node->right->data_type == TYPE_STRING) sb_append(sb, "%%s");
                     else if (node->right->data_type == TYPE_INT) sb_append(sb, "%%ld");
-                    else if (node->right->data_type == TYPE_FLOAT) sb_append(sb, "%%f");
+                    else if (node->right->data_type == TYPE_FLOAT) sb_append(sb, "%%g");
                     else sb_append(sb, "%%s");
                     sb_append(sb, "\", ");
                     generate_expression(sb, node->left);
                     sb_append(sb, ", ");
                     generate_expression(sb, node->right);
                     sb_append(sb, "); sub_strdup(_buf);})");
+                } else if (node->value &&
+                           ((node->left && node->left->data_type == TYPE_STRING) ||
+                            (node->right && node->right->data_type == TYPE_STRING)) &&
+                           (strcmp(node->value, "==") == 0 || strcmp(node->value, "!=") == 0 ||
+                            strcmp(node->value, "<") == 0  || strcmp(node->value, ">") == 0 ||
+                            strcmp(node->value, "<=") == 0 || strcmp(node->value, ">=") == 0)) {
+                    /* String comparison: compare contents via strcmp, not pointers */
+                    const char *cop = strcmp(node->value, "==") == 0 ? "== 0" :
+                                       strcmp(node->value, "!=") == 0 ? "!= 0" :
+                                       strcmp(node->value, "<")  == 0 ? "< 0"  :
+                                       strcmp(node->value, ">")  == 0 ? "> 0"  :
+                                       strcmp(node->value, "<=") == 0 ? "<= 0" : ">= 0";
+                    sb_append(sb, "(strcmp(");
+                    generate_expression(sb, node->left);
+                    sb_append(sb, ", ");
+                    generate_expression(sb, node->right);
+                    sb_append(sb, ") %s)", cop);
                 } else {
                     sb_append(sb, "(");
                     generate_expression(sb, node->left);
@@ -314,7 +331,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                             ASTNode *arg = node->children[i];
                             const char *fmt = "%ld";
                             if (arg->data_type == TYPE_INT) fmt = "%ld";
-                            else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                            else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                             else if (arg->data_type == TYPE_BOOL) fmt = "%d";
                             else if (arg->data_type == TYPE_STRING) fmt = "%s";
                             else if (arg->type == AST_LITERAL && arg->value) {
@@ -323,11 +340,11 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                 if (*end == '\0') fmt = "%ld";
                                 else {
                                     (void)strtod(arg->value, &end);
-                                    if (*end == '\0') fmt = "%f";
+                                    if (*end == '\0') fmt = "%g";
                                 }
                             } else if (arg->type == AST_BINARY_EXPR) {
                                 if (arg->data_type == TYPE_INT) fmt = "%ld";
-                                else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                                else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                                 else if (arg->data_type == TYPE_STRING) fmt = "%s";
                             }
                             sb_append(sb, "%s%s", fmt, i + 1 < node->child_count ? " " : "\\n");
@@ -657,7 +674,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "static inline double sub_float_from_str(const char* s) { return s ? atof(s) : 0.0; }\n");
     sb_append(sb, "static inline long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
     sb_append(sb, "static inline char* sub_str_from_long(long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%ld\", v); return sub_strdup(buf); }\n");
-    sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%f\", v); return sub_strdup(buf); }\n\n");
+    sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%g\", v); return sub_strdup(buf); }\n\n");
     
     /* Pass 1: Generate function declarations at file scope */
     if (ast && (ast->type == AST_PROGRAM || ast->type == AST_BLOCK)) {
